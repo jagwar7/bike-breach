@@ -19,6 +19,7 @@ namespace Project.Runtime.Core.Input
 
         private Vector2 _touchStartPos;
         private bool _isDragging;
+        
 
         private void Update()
         {
@@ -30,7 +31,11 @@ namespace Project.Runtime.Core.Input
             HasTapOccurred = false;
 
             var pointer = Pointer.current;
-            if (pointer == null) return;
+            if (pointer == null) {
+                Debug.Log("No point value");
+                return;
+            }
+          
 
             bool wasPressedThisFrame = pointer.press.wasPressedThisFrame;
             bool isHeld = pointer.press.isPressed;
