@@ -3,7 +3,7 @@ using UnityEngine;
 public class EnemyEngageState : IEnemyState
 {
     public EnemyStateType StateType => EnemyStateType.Engage;
-
+    
     private readonly EnemyCharacter _enemy;
     private float _nextFireTime;
 
@@ -53,8 +53,14 @@ public class EnemyEngageState : IEnemyState
         if (Time.time >= _nextFireTime)
         {
             _nextFireTime = Time.time + _enemy.Config.FireInterval;
-            Vector3 aimPosition = _enemy.CurrentTarget.position + (Vector3.up * 1.5f);
+
+            PlayerHead playerHead = _enemy.CurrentTarget.GetComponentInChildren<PlayerHead>();
+            Debug.Log(playerHead.gameObject.name);
+
+            Vector3 aimPosition = playerHead != null ? playerHead.transform.position : _enemy.CurrentTarget.position + (Vector3.up * 2.5f);
             _enemy.RequestShoot(aimPosition);
+
+            
         }
     }
 

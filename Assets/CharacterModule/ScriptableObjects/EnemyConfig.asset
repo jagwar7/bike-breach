@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9bb2d4d5b475d4b02885515ca6ac96c6, type: 3}
   m_Name: EnemyConfig
   m_EditorClassIdentifier: Assembly-CSharp::EnemyConfig
-  detectionRange: 25
+  detectionRange: 15
   turnSpeed: 10
   fireInterval: 0

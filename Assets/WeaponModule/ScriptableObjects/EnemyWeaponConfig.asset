@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0be98d8c8db0c46619e1348f12c82d0b, type: 3}
   m_Name: EnemyWeaponConfig
   m_EditorClassIdentifier: Assembly-CSharp::WeaponConfig
-  damage: 25
+  damage: 60
   fireRate: 1
-  bulletSpeed: 20
+  bulletSpeed: 30
   bulletPrefab: {fileID: 4003910652497418840, guid: 8ca0184316bcb4530b14d3d4d8b8f8e6, type: 3}
   fireParticle: {fileID: 2054588293172612404, guid: 58360aed1c2714222bd49a0c43716153, type: 3}
