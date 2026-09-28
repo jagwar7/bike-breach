@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0be98d8c8db0c46619e1348f12c82d0b, type: 3}
+  m_Name: PlayerWeaponCOnfig
+  m_EditorClassIdentifier: WeaponModule::WeaponConfig
+  damage: 30
+  fireRate: 0.2
+  bulletSpeed: 30
+  bulletPrefab: {fileID: 4003910652497418840, guid: 8ca0184316bcb4530b14d3d4d8b8f8e6, type: 3}
+  fireParticle: {fileID: 2054588293172612404, guid: 58360aed1c2714222bd49a0c43716153, type: 3}
