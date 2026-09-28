@@ -12,9 +12,14 @@ public class CrosshairAimInput : MonoBehaviour
     [SerializeField] private Camera mainCamera;
 
     [Header("Targeting Settings")]
-    [Tooltip("Layers to collide with (Set to 'Everything' to aim at any object/surface).")]
+    [Tooltip("Set to 'Everything' so the player aims at whatever the cursor touches.")]
     [SerializeField] private LayerMask aimLayers = ~0;
     [SerializeField] private float rayDistance = 100f;
+
+    [Header("Bottom Deadzone")]
+    [Tooltip("Screen height fraction (0.3 = bottom 30%) where aiming/shooting is disabled to avoid firing backwards.")]
+    [Range(0f, 0.5f)]
+    [SerializeField] private float bottomDeadzoneRatio = 0.3f;
 
     [Header("Sensitivity")]
     [Tooltip("Drag multiplier for moving the reticle.")]
@@ -24,8 +29,8 @@ public class CrosshairAimInput : MonoBehaviour
     private Vector3 _currentAimWorldPoint;
     private Vector2 _lastTouchPosition;
     private bool _wasTouching;
+    private bool _isInAimZone;
 
-    // Invisible anchor object representing the crosshair's world point
     private Transform _aimPointTransform;
 
     private void Awake()
@@ -37,7 +42,6 @@ public class CrosshairAimInput : MonoBehaviour
             mainCamera = Camera.main;
         }
 
-        // Create an invisible target for RiderAimController to lock onto
         GameObject aimObj = new GameObject("Crosshair_WorldAimPoint");
         _aimPointTransform = aimObj.transform;
     }
@@ -46,13 +50,12 @@ public class CrosshairAimInput : MonoBehaviour
     {
         _wasTouching = false;
 
-        // Center crosshair when combat begins
+        // Position crosshair safely above the bottom deadzone on entry
         if (crosshairRect != null)
         {
-            crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f);
+            crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.55f, 0f);
         }
 
-        // Direct RiderAimController to our world-aim point
         if (riderAim != null && _aimPointTransform != null)
         {
             riderAim.target = _aimPointTransform;
@@ -64,8 +67,8 @@ public class CrosshairAimInput : MonoBehaviour
         HandleScreenDrag();
         UpdateAimPointAndTarget();
 
-        // While touching/dragging anywhere, fire rapidly at the exact world point
-        if (_inputService != null && _inputService.IsTouching && playerCharacter != null)
+        // Fire rapidly whenever touching and aiming above the deadzone
+        if (_isInAimZone && _inputService != null && _inputService.IsTouching && playerCharacter != null)
         {
             playerCharacter.TryShoot(_currentAimWorldPoint);
         }
@@ -95,7 +98,6 @@ public class CrosshairAimInput : MonoBehaviour
         {
             crosshairRect.position += (Vector3)delta;
 
-            // Keep within screen bounds
             Vector3 pos = crosshairRect.position;
             pos.x = Mathf.Clamp(pos.x, 0f, Screen.width);
             pos.y = Mathf.Clamp(pos.y, 0f, Screen.height);
@@ -117,14 +119,19 @@ public class CrosshairAimInput : MonoBehaviour
     {
         if (crosshairRect == null || mainCamera == null) return;
 
-        // 1. Tell RiderAimController which half of the screen the reticle is on
-        if (riderAim != null)
+        // Verify cursor is above bottom deadzone
+        float bottomThreshold = Screen.height * bottomDeadzoneRatio;
+        _isInAimZone = crosshairRect.position.y > bottomThreshold;
+
+        // If in deadzone, drop the target so the torso returns to neutral
+        if (!_isInAimZone)
         {
-            riderAim.SetAimSideFromScreen(crosshairRect.position.x);
+            if (riderAim != null) riderAim.target = null;
+            return;
         }
 
-        // 2. Cast ray as normal
         Ray ray = mainCamera.ScreenPointToRay(crosshairRect.position);
+
         if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
         {
             _currentAimWorldPoint = hit.point;
@@ -137,6 +144,7 @@ public class CrosshairAimInput : MonoBehaviour
         if (_aimPointTransform != null)
         {
             _aimPointTransform.position = _currentAimWorldPoint;
+
             if (riderAim != null && riderAim.target != _aimPointTransform)
             {
                 riderAim.target = _aimPointTransform;

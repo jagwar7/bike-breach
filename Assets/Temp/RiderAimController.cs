@@ -5,25 +5,33 @@ public class RiderAimController : MonoBehaviour
     [Header("Target")]
     public Transform target;
 
-    [Header("Bones")]
-    [Tooltip("Spine bone to rotate.")]
+    [Header("Spine Bone")]
+    [Tooltip("Assign mixamorig:Spine, Spine1, or Spine2.")]
     [SerializeField] private Transform spineBone;
 
-    [Header("Subtle Spine Twist Limit")]
-    [Tooltip("Maximum degrees the spine will turn left or right (keep around 15-25 deg).")]
-    [SerializeField] private float maxSpineAngle = 20f;
+    [Header("Horizontal (Yaw) Settings")]
+    [Tooltip("Maximum degrees the spine can rotate left/right.")]
+    [SerializeField] private float maxTurnAngle = 60f;
 
-    [Tooltip("Speed of turning.")]
-    [SerializeField] private float turnSpeed = 15f;
+    [Tooltip("Check this if moving the crosshair right makes the spine turn left.")]
+    [SerializeField] private bool invertYawDirection = true;
 
-    [Header("Rig Compensation")]
-    [Tooltip("If the spine turns the wrong way (left instead of right), toggle this.")]
-    [SerializeField] private bool invertYaw = true;
+    [Header("Vertical (Pitch) Settings")]
+    [Tooltip("Maximum degrees the spine can tilt upward.")]
+    [SerializeField] private float maxPitchUpAngle = 35f;
 
-    public bool IsAimingRight { get; private set; } = true;
+    [Tooltip("Maximum degrees the spine can tilt downward.")]
+    [SerializeField] private float maxPitchDownAngle = 15f;
 
-    private float _currentYaw;
-    private Quaternion _initialLocalRotation;
+    [Tooltip("Check this if aiming up makes the spine pitch down.")]
+    [SerializeField] private bool invertPitchDirection = false;
+
+    [Header("Smoothing")]
+    [Tooltip("Speed of aiming interpolation.")]
+    [SerializeField] private float aimSpeed = 15f;
+
+    private float _currentYawOffset;
+    private float _currentPitchOffset;
 
     private void Awake()
     {
@@ -38,38 +46,64 @@ public class RiderAimController : MonoBehaviour
         }
     }
 
-    public void SetAimSideFromScreen(float screenX)
-    {
-        IsAimingRight = screenX >= (Screen.width * 0.5f);
-    }
-
     private void LateUpdate()
     {
-        if (spineBone == null || target == null) return;
+        if (spineBone == null) return;
 
-        // 1. Calculate direction to the target on the horizontal plane
-        Vector3 toTarget = target.position - spineBone.position;
-        Vector3 flatTargetDir = Vector3.ProjectOnPlane(toTarget, Vector3.up).normalized;
-        Vector3 flatForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
-
-        if (flatTargetDir.sqrMagnitude < 0.001f || flatForward.sqrMagnitude < 0.001f) return;
-
-        // 2. Measure angle between character forward and target
-        float targetYaw = Vector3.SignedAngle(flatForward, flatTargetDir, Vector3.up);
-
-        // Mixamo 180-degree hip compensation
-        if (invertYaw)
+        // Smoothly return to default posture if no target
+        if (target == null)
         {
-            targetYaw = -targetYaw;
+            _currentYawOffset = Mathf.Lerp(_currentYawOffset, 0f, aimSpeed * Time.deltaTime);
+            _currentPitchOffset = Mathf.Lerp(_currentPitchOffset, 0f, aimSpeed * Time.deltaTime);
+
+            if (Mathf.Abs(_currentYawOffset) > 0.01f || Mathf.Abs(_currentPitchOffset) > 0.01f)
+            {
+                ApplyAimRotations(_currentYawOffset, _currentPitchOffset, transform.forward);
+            }
+            return;
         }
 
-        // 3. Clamp to subtle angle so it doesn't over-twist
-        targetYaw = Mathf.Clamp(targetYaw, -maxSpineAngle, maxSpineAngle);
+        Vector3 toTarget = target.position - spineBone.position;
+        if (toTarget.sqrMagnitude < 0.001f) return;
 
-        // 4. Smoothly interpolate angle
-        _currentYaw = Mathf.Lerp(_currentYaw, targetYaw, turnSpeed * Time.deltaTime);
 
-        // 5. Apply the twist on top of the animator's current frame pose
-        spineBone.localRotation = spineBone.localRotation * Quaternion.Euler(0f, _currentYaw, 0f);
+        Vector3 flatTarget = Vector3.ProjectOnPlane(toTarget, Vector3.up).normalized;
+        Vector3 flatForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+
+        float targetYaw = 0f;
+        if (flatTarget.sqrMagnitude > 0.001f && flatForward.sqrMagnitude > 0.001f)
+        {
+            targetYaw = Vector3.SignedAngle(flatForward, flatTarget, Vector3.up);
+            if (invertYawDirection) targetYaw = -targetYaw;
+            targetYaw = Mathf.Clamp(targetYaw, -maxTurnAngle, maxTurnAngle);
+        }
+
+
+        float horizontalDistance = new Vector2(toTarget.x, toTarget.z).magnitude;
+        float targetPitch = Mathf.Atan2(toTarget.y, horizontalDistance) * Mathf.Rad2Deg;
+
+        if (invertPitchDirection) targetPitch = -targetPitch;
+
+        // Clamp upward and downward tilt
+        targetPitch = Mathf.Clamp(targetPitch, -maxPitchDownAngle, maxPitchUpAngle);
+
+
+        _currentYawOffset = Mathf.Lerp(_currentYawOffset, targetYaw, aimSpeed * Time.deltaTime);
+        _currentPitchOffset = Mathf.Lerp(_currentPitchOffset, targetPitch, aimSpeed * Time.deltaTime);
+
+
+        ApplyAimRotations(_currentYawOffset, _currentPitchOffset, flatTarget.sqrMagnitude > 0.001f ? flatTarget : flatForward);
+    }
+
+    private void ApplyAimRotations(float yaw, float pitch, Vector3 forwardDir)
+    {
+
+        Quaternion yawRot = Quaternion.AngleAxis(yaw, Vector3.up);
+
+
+        Vector3 pitchAxis = Vector3.Cross(Vector3.up, forwardDir).normalized;
+        Quaternion pitchRot = Quaternion.AngleAxis(-pitch, pitchAxis);
+
+        spineBone.rotation = pitchRot * yawRot * spineBone.rotation;
     }
 }
