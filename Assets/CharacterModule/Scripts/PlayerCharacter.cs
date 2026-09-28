@@ -11,11 +11,14 @@ public class PlayerCharacter : MonoBehaviour
     
     private Health health;
     private RagdollController ragdoll; 
-
+    private RiderAimController aimController;
+    private Animator animator;
     void Awake()
     {
         animBridge = GetComponent<CharacterAnimationBridge>();
         weapon = GetComponentInChildren<Weapon>();
+        aimController = GetComponent<RiderAimController>();
+        animator = GetComponent<Animator>();
         if (weapon != null)
         {
             weaponConfig = weapon.config;
@@ -48,26 +51,49 @@ public class PlayerCharacter : MonoBehaviour
 
     void Update()
     {
+        // Debug fallback for editor testing
         if (Input.GetKey(KeyCode.F))
         {
-            Shoot();
+            TryShoot(transform.position + transform.forward * 20f);
         }
     }
 
-    void Shoot()
+    /// <summary>
+    /// Call this while holding/dragging the screen to continuously fire towards the crosshair's world point.
+    /// When released, simply stop calling this method.
+    /// </summary>
+    public void TryShoot(Vector3 targetWorldPosition)
     {
+        if(!enabled) return;
+        if (weapon == null || weaponConfig == null) return;
         if (Time.time <= lastFireTime) return;
 
-        animBridge.PlayShootAnimation();
-        Vector3 targetPosition = transform.position + transform.forward * 20f;
-        weapon.Fire(targetPosition);
+        if (animBridge != null)
+        {
+            animBridge.PlayShootAnimation();
+        }
+
+        weapon.Fire(targetWorldPosition);
         lastFireTime = Time.time + weaponConfig.fireRate;
     }
 
     private void HandleDeath()
     {
+        // 1. Disable Aim Controller so it stops fighting the ragdoll physics
+        if (aimController != null)
+        {
+            aimController.enabled = false;
+        }
         transform.SetParent(null);
 
+
+        if(animator != null)
+        {
+            animator.enabled = false;
+        }
+
+
+        // 2. Activate the ragdoll physics
         if (ragdoll != null)
         {
             ragdoll.SetRagdollActive(true);
