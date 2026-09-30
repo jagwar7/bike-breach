@@ -19,7 +19,7 @@ public class CrosshairAimInput : MonoBehaviour
     [Header("Bottom Deadzone")]
     [Tooltip("Screen height fraction (0.3 = bottom 30%) where aiming/shooting is disabled to avoid firing backwards.")]
     [Range(0f, 0.5f)]
-    [SerializeField] private float bottomDeadzoneRatio = 0.3f;
+    [SerializeField] private float bottomDeadzoneRatio = 0.4f;
 
     [Header("Sensitivity")]
     [Tooltip("Drag multiplier for moving the reticle.")]
@@ -44,16 +44,27 @@ public class CrosshairAimInput : MonoBehaviour
 
         GameObject aimObj = new GameObject("Crosshair_WorldAimPoint");
         _aimPointTransform = aimObj.transform;
+
+        // Auto-assign player character if slot was missed in inspector
+        if (playerCharacter == null)
+        {
+            playerCharacter = FindAnyObjectByType<PlayerCharacter>();
+        }
+
+        if (riderAim == null)
+        {
+            riderAim = FindAnyObjectByType<RiderAimController>();
+        }
     }
 
     private void OnEnable()
     {
         _wasTouching = false;
 
-        // Position crosshair safely above the bottom deadzone on entry
+        // Position crosshair safely in upper screen on start
         if (crosshairRect != null)
         {
-            crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.55f, 0f);
+            crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.75f, 0f);
         }
 
         if (riderAim != null && _aimPointTransform != null)
@@ -64,19 +75,34 @@ public class CrosshairAimInput : MonoBehaviour
 
     private void Update()
     {
-        HandleScreenDrag();
+        bool isScreenTouching = IsInputActive();
+
+        HandleScreenDrag(isScreenTouching);
         UpdateAimPointAndTarget();
 
-        // Fire rapidly whenever touching and aiming above the deadzone
-        if (_isInAimZone && _inputService != null && _inputService.IsTouching && playerCharacter != null)
+        // Fire rapidly whenever screen is touched/dragged and reticle is above the deadzone
+        if (_isInAimZone && isScreenTouching && playerCharacter != null)
         {
             playerCharacter.TryShoot(_currentAimWorldPoint);
         }
     }
 
-    private void HandleScreenDrag()
+    /// <summary>
+    /// Checks touch input directly, falling back safely without relying exclusively on external service state.
+    /// </summary>
+    private bool IsInputActive()
     {
-        if (_inputService == null || !_inputService.IsTouching)
+        if (_inputService != null && _inputService.IsTouching)
+        {
+            return true;
+        }
+
+        return Input.GetMouseButton(0) || Input.touchCount > 0;
+    }
+
+    private void HandleScreenDrag(bool isTouching)
+    {
+        if (!isTouching)
         {
             _wasTouching = false;
             return;
@@ -119,18 +145,20 @@ public class CrosshairAimInput : MonoBehaviour
     {
         if (crosshairRect == null || mainCamera == null) return;
 
-        // Verify cursor is above bottom deadzone
-        float bottomThreshold = Screen.height * bottomDeadzoneRatio;
-        _isInAimZone = crosshairRect.position.y > bottomThreshold;
+        // Convert UI rect screen coordinate accurately regardless of Canvas Render Mode
+        Vector2 screenPos = RectTransformUtility.WorldToScreenPoint(null, crosshairRect.position);
 
-        // If in deadzone, drop the target so the torso returns to neutral
+        float bottomThreshold = Screen.height * bottomDeadzoneRatio;
+        _isInAimZone = screenPos.y > bottomThreshold;
+
+        // If reticle enters bottom deadzone, drop target so rider returns to neutral riding posture
         if (!_isInAimZone)
         {
             if (riderAim != null) riderAim.target = null;
             return;
         }
 
-        Ray ray = mainCamera.ScreenPointToRay(crosshairRect.position);
+        Ray ray = mainCamera.ScreenPointToRay(screenPos);
 
         if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
         {

@@ -26,15 +26,15 @@ public class EnemyEngageState : IEnemyState
             _enemy.StateMachine.ChangeState(_enemy.IdleState);
             return;
         }
+        Debug.Log("PLAYER FOUND-----");
 
-
-        float distance = Vector3.Distance(_enemy.transform.position, _enemy.CurrentTarget.position);
-        if (distance > _enemy.Config.DetectionRange)
-        {
-            _enemy.StateMachine.ChangeState(_enemy.IdleState);
-            return;
-        }
-
+        // float distance = Vector3.Distance(_enemy.transform.position, _enemy.CurrentTarget.position);
+        // if (distance > _enemy.Config.DetectionRange)
+        // {
+        //     _enemy.StateMachine.ChangeState(_enemy.IdleState);
+        //     return;
+        // }
+        
 
         Vector3 direction = (_enemy.CurrentTarget.position - _enemy.transform.position).normalized;
         direction.y = 0f;
@@ -55,7 +55,6 @@ public class EnemyEngageState : IEnemyState
             _nextFireTime = Time.time + _enemy.Config.FireInterval;
 
             PlayerHead playerHead = _enemy.CurrentTarget.GetComponentInChildren<PlayerHead>();
-            Debug.Log(playerHead.gameObject.name);
 
             Vector3 aimPosition = playerHead != null ? playerHead.transform.position : _enemy.CurrentTarget.position + (Vector3.up * 2.5f);
             _enemy.RequestShoot(aimPosition);

@@ -11,6 +11,9 @@ public class EnemyCharacter : MonoBehaviour
     [Header("Settings")]
     [SerializeField] private EnemyConfig config;
 
+    [Header("Slow Motion Trigger")]
+    [SerializeField] private float slowMoDistanceThreshold = 15f;
+
     public event Action<Vector3> OnShootRequested;
     public event Action<EnemyStateType> OnStateChanged;
 
@@ -24,6 +27,8 @@ public class EnemyCharacter : MonoBehaviour
 
     private Health _ownHealth;
     private Health _targetHealth;
+    private bool _isSlowMoActive;
+    private bool _isDead;
 
     private void Awake()
     {
@@ -37,6 +42,8 @@ public class EnemyCharacter : MonoBehaviour
         StateMachine.OnStateChanged += (state) => OnStateChanged?.Invoke(state);
 
         StateMachine.Initialize(IdleState);
+        _isSlowMoActive = false;
+        _isDead = false;
     }
 
     private void OnEnable()
@@ -69,12 +76,20 @@ public class EnemyCharacter : MonoBehaviour
             targetChannel.OnTransformChanged -= HandleTargetChanged;
         }
 
+        // Safeguard: restore normal timescale if this enemy gets disabled mid-combat
+        if (_isSlowMoActive && TimeManager.Instance != null)
+        {
+            _isSlowMoActive = false;
+            TimeManager.Instance.RestoreNormalTime();
+        }
+
         ClearTarget();
     }
 
     private void Update()
     {
         StateMachine.Update();
+        HandleSlowMotionRange();
     }
 
     private void HandleTargetChanged(Transform newTarget)
@@ -96,6 +111,24 @@ public class EnemyCharacter : MonoBehaviour
         if (_targetHealth != null)
         {
             _targetHealth.OnDeath += HandleTargetDied;
+        }
+    }
+
+    private void HandleSlowMotionRange()
+    {
+        if (_isDead || !HasValidTarget() || TimeManager.Instance == null) return;
+
+        float distance = Vector3.Distance(transform.position, CurrentTarget.position);
+
+        if (distance <= slowMoDistanceThreshold && !_isSlowMoActive)
+        {
+            _isSlowMoActive = true;
+            TimeManager.Instance.EnableSlowMotion(0.5f);
+        }
+        else if (distance > slowMoDistanceThreshold && _isSlowMoActive)
+        {
+            _isSlowMoActive = false;
+            TimeManager.Instance.RestoreNormalTime();
         }
     }
 
@@ -127,6 +160,15 @@ public class EnemyCharacter : MonoBehaviour
 
     private void HandleSelfDeath()
     {
+        _isDead = true;
+
+        // Restore normal game speed immediately when killed
+        if (_isSlowMoActive && TimeManager.Instance != null)
+        {
+            _isSlowMoActive = false;
+            TimeManager.Instance.RestoreNormalTime();
+        }
+
         StateMachine.ChangeState(DeadState);
     }
 
@@ -134,7 +176,6 @@ public class EnemyCharacter : MonoBehaviour
     {
         if (CurrentTarget == null || config == null)
             return false;
-
 
         if (_targetHealth != null && _targetHealth.CurrentHealth <= 0)
             return false;

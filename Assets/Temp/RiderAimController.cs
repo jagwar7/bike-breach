@@ -66,7 +66,7 @@ public class RiderAimController : MonoBehaviour
         Vector3 toTarget = target.position - spineBone.position;
         if (toTarget.sqrMagnitude < 0.001f) return;
 
-
+        // 1. Horizontal (Yaw) Calculation
         Vector3 flatTarget = Vector3.ProjectOnPlane(toTarget, Vector3.up).normalized;
         Vector3 flatForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
 
@@ -78,29 +78,24 @@ public class RiderAimController : MonoBehaviour
             targetYaw = Mathf.Clamp(targetYaw, -maxTurnAngle, maxTurnAngle);
         }
 
-
+        // 2. Vertical (Pitch) Calculation
         float horizontalDistance = new Vector2(toTarget.x, toTarget.z).magnitude;
         float targetPitch = Mathf.Atan2(toTarget.y, horizontalDistance) * Mathf.Rad2Deg;
 
         if (invertPitchDirection) targetPitch = -targetPitch;
-
-        // Clamp upward and downward tilt
         targetPitch = Mathf.Clamp(targetPitch, -maxPitchDownAngle, maxPitchUpAngle);
 
-
+        // 3. Smooth transitions
         _currentYawOffset = Mathf.Lerp(_currentYawOffset, targetYaw, aimSpeed * Time.deltaTime);
         _currentPitchOffset = Mathf.Lerp(_currentPitchOffset, targetPitch, aimSpeed * Time.deltaTime);
 
-
+        // 4. Apply compound rotation to the spine bone
         ApplyAimRotations(_currentYawOffset, _currentPitchOffset, flatTarget.sqrMagnitude > 0.001f ? flatTarget : flatForward);
     }
 
     private void ApplyAimRotations(float yaw, float pitch, Vector3 forwardDir)
     {
-
         Quaternion yawRot = Quaternion.AngleAxis(yaw, Vector3.up);
-
-
         Vector3 pitchAxis = Vector3.Cross(Vector3.up, forwardDir).normalized;
         Quaternion pitchRot = Quaternion.AngleAxis(-pitch, pitchAxis);
 

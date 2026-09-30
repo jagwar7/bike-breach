@@ -328,6 +328,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::EnemyCharacter
   targetChannel: {fileID: 11400000, guid: 89530885f144e49acb4a974b41755d2a, type: 2}
   config: {fileID: 11400000, guid: 798c62d6b15ad49388fd721ed5d3edaa, type: 2}
+  slowMoDistanceThreshold: 10
 --- !u!114 &2816300458583105375
 MonoBehaviour:
   m_ObjectHideFlags: 0
