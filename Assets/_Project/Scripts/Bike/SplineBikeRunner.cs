@@ -4,15 +4,15 @@ using UnityEngine.Splines;
 using Unity.Mathematics;
 using Project.Runtime.Core.Input;
 
-namespace Project.Runtime.Bike
-{
+    
     public enum BikeRunState
     {
         OnPipeline,
         TransitioningToShip,
         OnShipDeckCombat,
         ReachedFinishLine,
-        Fallen
+        Fallen,
+        PlayerDead
     }
 
     [RequireComponent(typeof(Rigidbody))]
@@ -39,9 +39,17 @@ namespace Project.Runtime.Bike
         [Tooltip("Constant speed while driving through the combat zone. Requires no player throttle.")]
         [SerializeField] private float shipAutoSpeed = 7f;
 
+        [Header("Death Behavior")]
+        [Tooltip("Reference to the player child character. Will unparent on death.")]
+        [SerializeField] private Transform playerCharacterTransform;
+
+        [Tooltip("If true, the bike drops onto its physics collider and skids to a stop instead of instantly freezing.")]
+        [SerializeField] private bool usePhysicsCrashOnDeath = true;
+
         [Header("Events")]
         [SerializeField] private UnityEvent onEnteredShipCombat;
         [SerializeField] private UnityEvent onFinishedRun;
+        [SerializeField] private UnityEvent onPlayerDied;
 
         private IInputService _inputService;
         private Rigidbody _rb;
@@ -71,11 +79,23 @@ namespace Project.Runtime.Bike
             _rb.interpolation = RigidbodyInterpolation.Interpolate;
 
             _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
+
+            if (playerCharacterTransform == null)
+            {
+                // Auto-detect PLAYER_CH in children if not assigned via Inspector
+                Transform found = transform.Find("PLAYER_CH");
+                if (found != null)
+                {
+                    playerCharacterTransform = found;
+                }
+            }
         }
 
         private void Update()
         {
-            if (_currentState == BikeRunState.Fallen || _currentState == BikeRunState.ReachedFinishLine) return;
+            if (_currentState == BikeRunState.Fallen || 
+                _currentState == BikeRunState.ReachedFinishLine || 
+                _currentState == BikeRunState.PlayerDead) return;
 
             switch (_currentState)
             {
@@ -91,6 +111,38 @@ namespace Project.Runtime.Bike
                     HandleShipDeckCombat();
                     break;
             }
+        }
+
+        /// <summary>
+        /// Call this method when the player's health drops to 0.
+        /// </summary>
+        public void OnPlayerDied()
+        {
+            if (_currentState == BikeRunState.PlayerDead || _currentState == BikeRunState.Fallen) return;
+
+            _currentState = BikeRunState.PlayerDead;
+            _currentSpeed = 0f;
+
+            // 1. Unparent player so ragdoll/death animation is decoupled from the bike
+            if (playerCharacterTransform != null)
+            {
+                playerCharacterTransform.SetParent(null, true);
+            }
+
+            // 2. Tumble or skid the bike with physics
+            if (usePhysicsCrashOnDeath)
+            {
+                _rb.isKinematic = false;
+                _rb.useGravity = true;
+                _rb.constraints = RigidbodyConstraints.None;
+
+                float forwardVelocity = _currentState == BikeRunState.OnShipDeckCombat ? shipAutoSpeed * 0.8f : _currentSpeed * 0.8f;
+                _rb.linearVelocity = transform.forward * forwardVelocity;
+                _rb.AddTorque(transform.forward * 2f + transform.right * 1f, ForceMode.Impulse);
+            }
+
+            onPlayerDied?.Invoke();
+            Debug.Log("<color=red>[Bike] Player died. Spline progression halted.</color>");
         }
 
         // ==========================================
@@ -109,7 +161,6 @@ namespace Project.Runtime.Bike
             float splineLength = pipelineSpline.CalculateLength();
             _currentDistance += _currentSpeed * Time.deltaTime;
 
-            // AFTER REACHING THE END OF THE SPLINE 1
             if (_currentDistance >= splineLength)
             {
                 StartShipTransition();
@@ -131,7 +182,7 @@ namespace Project.Runtime.Bike
             float bendAngle = Vector3.SignedAngle(forward, aheadForward, up);
             _rollAngle -= bendAngle * curveCentrifugalFactor * Time.deltaTime;
 
-            // LEFT RIGHT BALANCE CONTROL
+            // Balance control
             float steerInput = isTouching ? _inputService.MoveInput.x : 0f;
             if (Mathf.Abs(steerInput) > 0.05f)
             {
@@ -142,14 +193,12 @@ namespace Project.Runtime.Bike
                 _rollAngle = Mathf.MoveTowards(_rollAngle, 0f, autoCenterSpeed * Time.deltaTime);
             }
 
-            // CHECK ROLLING ON PIPE
             if (Mathf.Abs(_rollAngle) >= fallAngleLimit)
             {
                 TriggerPhysicsFall(forward, right, up);
                 return;
             }
 
-            // Lock to cylinder surface
             float rad = _rollAngle * Mathf.Deg2Rad;
             Vector3 surfaceNormal = (right * Mathf.Sin(rad) + up * Mathf.Cos(rad)).normalized;
 
@@ -169,7 +218,6 @@ namespace Project.Runtime.Bike
 
             if (shipSpline != null)
             {
-                // Sample Knot 0 (t = 0) of Spline 2
                 shipSpline.Spline.Evaluate(0f, out float3 startLocalPos, out float3 startLocalTangent, out _);
                 _knot0WorldPos = shipSpline.transform.TransformPoint(startLocalPos);
 
@@ -178,7 +226,6 @@ namespace Project.Runtime.Bike
             }
             else
             {
-                // Fallback straight vector if spline 2 is not linked
                 _knot0WorldPos = transform.position + (transform.forward * transitionDistance);
                 _knot0WorldRot = Quaternion.LookRotation(transform.forward, Vector3.up);
             }
@@ -189,11 +236,9 @@ namespace Project.Runtime.Bike
             float step = (transitionSpeed / Mathf.Max(transitionDistance, 0.1f)) * Time.deltaTime;
             _transitionProgress = Mathf.Clamp01(_transitionProgress + step);
 
-            // Interpolate position and flatten orientation upright toward Knot 0
             transform.position = Vector3.Lerp(_transitionStartPos, _knot0WorldPos, _transitionProgress);
             transform.rotation = Quaternion.Slerp(_transitionStartRot, _knot0WorldRot, _transitionProgress);
 
-            // Snapped to Knot 0: hand off completely to Spline 2
             if (_transitionProgress >= 1.0f)
             {
                 _currentState = BikeRunState.OnShipDeckCombat;
@@ -213,8 +258,6 @@ namespace Project.Runtime.Bike
             if (shipSpline == null) return;
 
             float shipSplineLength = shipSpline.CalculateLength();
-            
-            // Automatic fixed-speed progression (no touch input required to move)
             _currentDistance += shipAutoSpeed * Time.deltaTime;
 
             if (_currentDistance >= shipSplineLength)
@@ -228,7 +271,6 @@ namespace Project.Runtime.Bike
 
             float t = Mathf.Clamp01(_currentDistance / shipSplineLength);
 
-            // Follow Spline 2 directly
             shipSpline.Spline.Evaluate(t, out float3 localPos, out float3 localTangent, out _);
             Vector3 worldPos = shipSpline.transform.TransformPoint(localPos);
             Vector3 forward = shipSpline.transform.TransformDirection(math.normalize(localTangent));
@@ -267,4 +309,3 @@ namespace Project.Runtime.Bike
             _rb.AddTorque(controlledTumble, ForceMode.Impulse);
         }
     }
-}

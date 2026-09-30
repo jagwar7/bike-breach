@@ -14,4 +14,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::EnemyConfig
   detectionRange: 15
   turnSpeed: 10
-  fireInterval: 0
+  fireInterval: 0.2

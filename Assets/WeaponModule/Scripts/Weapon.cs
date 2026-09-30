@@ -22,7 +22,7 @@ public class Weapon : MonoBehaviour
     }
 
     public bool Fire(Vector3 targetPosition)
-    {
+    {   
         if (config == null || Time.time < _nextFireTime) return false;
 
         _nextFireTime = Time.time + config.fireRate;
@@ -49,7 +49,6 @@ public class Weapon : MonoBehaviour
 
             Quaternion flippedRotation = firePoint.rotation * Quaternion.Euler(0f, 180f, 0f);
             ParticleSystem muzzleFlash = Instantiate(config.fireParticle, firePoint.position, flippedRotation);
-            Debug.Log("PARTICLE EFFECT NAME: " + muzzleFlash.gameObject.name);
 
             muzzleFlash.Play();
             Destroy(muzzleFlash.gameObject, muzzleFlash.main.duration + muzzleFlash.main.startLifetime.constantMax);
