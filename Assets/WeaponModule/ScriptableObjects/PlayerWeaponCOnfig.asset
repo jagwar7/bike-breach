@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: PlayerWeaponConfig
   m_EditorClassIdentifier: WeaponModule::WeaponConfig
   damage: 30
-  fireRate: 0.2
+  fireRate: 0.5
   bulletSpeed: 60
   bulletPrefab: {fileID: 4003910652497418840, guid: 8ca0184316bcb4530b14d3d4d8b8f8e6, type: 3}
   fireParticle: {fileID: 2054588293172612404, guid: 58360aed1c2714222bd49a0c43716153, type: 3}
