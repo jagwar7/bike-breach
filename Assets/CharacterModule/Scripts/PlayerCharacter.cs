@@ -73,12 +73,10 @@ public class PlayerCharacter : MonoBehaviour
     /// </summary>
     public void TryShoot(Vector3 targetWorldPosition)
     {
-        Debug.Log($"[SHOOT CHECK 1] TryShoot reached! Enabled: {enabled}, Time: {Time.time}, LastFire: {lastFireTime}");
 
         if (!enabled) return;
         if (Time.time <= lastFireTime) 
         {
-            Debug.Log("[SHOOT CHECK 2] Blocked by fireRate / lastFireTime cooldown.");
             return;
         }
 
@@ -95,13 +93,13 @@ public class PlayerCharacter : MonoBehaviour
 
         if (weaponL != null)
         {
-            Debug.Log("[SHOOT CHECK 4] Calling weaponL.Fire()");
+            // Debug.Log("[SHOOT CHECK 4] Calling weaponL.Fire()");
             weaponL.Fire(targetWorldPosition);
         }
 
         if (weaponR != null)
         {
-            Debug.Log("[SHOOT CHECK 4] Calling weaponR.Fire()");
+            // Debug.Log("[SHOOT CHECK 4] Calling weaponR.Fire()");
             weaponR.Fire(targetWorldPosition);
         }
 

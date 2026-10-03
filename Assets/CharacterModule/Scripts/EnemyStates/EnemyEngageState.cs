@@ -26,7 +26,6 @@ public class EnemyEngageState : IEnemyState
             _enemy.StateMachine.ChangeState(_enemy.IdleState);
             return;
         }
-        Debug.Log("PLAYER FOUND-----");
 
         // float distance = Vector3.Distance(_enemy.transform.position, _enemy.CurrentTarget.position);
         // if (distance > _enemy.Config.DetectionRange)

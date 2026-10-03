@@ -25,6 +25,9 @@ public class CrosshairAimInput : MonoBehaviour
     [Tooltip("Drag multiplier for moving the reticle.")]
     [SerializeField] private float dragSensitivity = 1f;
 
+    [Header("Raycast Debug")]
+    [SerializeField] private Transform weaponMuzzle;
+
     private IInputService _inputService;
     private Vector3 _currentAimWorldPoint;
     private Vector2 _lastTouchPosition;
@@ -140,24 +143,28 @@ public class CrosshairAimInput : MonoBehaviour
 
         return Input.mousePosition;
     }
-
     private void UpdateAimPointAndTarget()
     {
         if (crosshairRect == null || mainCamera == null) return;
 
-        // Convert UI rect screen coordinate accurately regardless of Canvas Render Mode
-        Vector2 screenPos = RectTransformUtility.WorldToScreenPoint(null, crosshairRect.position);
+        // Convert UI rect to screen position
+        Canvas canvas = crosshairRect.GetComponentInParent<Canvas>();
+        Camera uiCam = (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay) 
+            ? canvas.worldCamera 
+            : null;
+
+        Vector2 screenPos = RectTransformUtility.WorldToScreenPoint(uiCam, crosshairRect.position);
 
         float bottomThreshold = Screen.height * bottomDeadzoneRatio;
         _isInAimZone = screenPos.y > bottomThreshold;
 
-        // If reticle enters bottom deadzone, drop target so rider returns to neutral riding posture
         if (!_isInAimZone)
         {
             if (riderAim != null) riderAim.target = null;
             return;
         }
 
+        // 1. Cast ray from screen cursor into the 3D scene
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
 
         if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
@@ -169,6 +176,18 @@ public class CrosshairAimInput : MonoBehaviour
             _currentAimWorldPoint = ray.GetPoint(rayDistance);
         }
 
+        // 2. Draw a line from the weapon muzzle to the exact hit position on the object
+        if (weaponMuzzle != null)
+        {
+            Debug.DrawLine(weaponMuzzle.position, _currentAimWorldPoint, Color.red);
+        }
+        else if (playerCharacter != null)
+        {
+            // Fallback to player position if muzzle is not assigned
+            Debug.DrawLine(playerCharacter.transform.position + Vector3.up * 1.2f, _currentAimWorldPoint, Color.red);
+        }
+
+        // Update target transform for IK / aiming
         if (_aimPointTransform != null)
         {
             _aimPointTransform.position = _currentAimWorldPoint;
@@ -179,7 +198,6 @@ public class CrosshairAimInput : MonoBehaviour
             }
         }
     }
-
     private void OnDestroy()
     {
         if (_aimPointTransform != null)

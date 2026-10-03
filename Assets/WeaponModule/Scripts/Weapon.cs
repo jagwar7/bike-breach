@@ -19,6 +19,7 @@ public class Weapon : MonoBehaviour
         }
 
         Vector3 direction = (targetPosition - firePoint.position).normalized;
+        Debug.DrawLine(firePoint.position, targetPosition, Color.green, 10.0f);
         if (direction == Vector3.zero)
         {
             return false;
