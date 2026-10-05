@@ -41,7 +41,7 @@ public class SplineBikeRunner : MonoBehaviour
     [SerializeField] private float transitionSpeed = 8f;
 
     [Header("Ship Combat Movement (Automatic Fixed Speed)")]
-    [SerializeField] private float shipAutoSpeed = 7f;
+    [SerializeField] private float shipAutoSpeed = 15f;
 
     [Header("Death Behavior")]
     [SerializeField] private Transform playerCharacterTransform;
@@ -92,6 +92,10 @@ public class SplineBikeRunner : MonoBehaviour
 
     private void Update()
     {
+        // IF GAME HASNT STARTED, DO NOT PROGRESS BIKE
+        if(GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing) return;
+
+
         // Stop all movement and wheel spinning if fallen, dead, or completed
         if (_currentState == BikeRunState.Fallen || 
             _currentState == BikeRunState.ReachedFinishLine || 
@@ -111,7 +115,6 @@ public class SplineBikeRunner : MonoBehaviour
                 HandleShipDeckCombat();
                 break;
         }
-
         RotateWheels();
     }
 
@@ -310,5 +313,75 @@ public class SplineBikeRunner : MonoBehaviour
         float tumbleDirection = Mathf.Sign(_rollAngle);
         Vector3 controlledTumble = (forward * 1.5f * tumbleDirection) + (right * 1.0f);
         _rb.AddTorque(controlledTumble, ForceMode.Impulse);
+
+        if(GameManager.Instance != null)
+        {
+            GameManager.Instance.TriggerDefeat();
+        }
     }
+
+
+    /// <summary>
+    /// Called by LevelManager to assign new splines and reset the bike state.
+    /// </summary>
+    public void InitializeLevel(SplineContainer pipe, SplineContainer ship)
+    {
+        pipelineSpline = pipe;
+        shipSpline = ship;
+
+        // Reset progression variables
+        _currentState = BikeRunState.OnPipeline;
+        _currentDistance = 0f;
+        _currentSpeed = 0f;
+        _rollAngle = 0f;
+        _transitionProgress = 0f;
+
+        // Reset Rigidbody physics to Kinematic
+        if (_rb == null) _rb = GetComponent<Rigidbody>();
+        _rb.isKinematic = true;
+        _rb.useGravity = false;
+        _rb.linearVelocity = Vector3.zero;
+        _rb.angularVelocity = Vector3.zero;
+        _rb.constraints = RigidbodyConstraints.None;
+
+        // Re-parent player character if it was unparented during death
+        if (playerCharacterTransform != null && playerCharacterTransform.parent != transform)
+        {
+            playerCharacterTransform.SetParent(transform, true);
+            playerCharacterTransform.localPosition = Vector3.zero;
+            playerCharacterTransform.localRotation = Quaternion.identity;
+        }
+
+        // Align bike directly to start of pipeline spline if available
+        if (pipelineSpline != null)
+        {
+            pipelineSpline.Spline.Evaluate(0f, out float3 startPos, out float3 startTangent, out float3 startUp);
+            Vector3 worldPos = pipelineSpline.transform.TransformPoint(startPos);
+            Vector3 forward = pipelineSpline.transform.TransformDirection(math.normalize(startTangent));
+            Vector3 up = pipelineSpline.transform.TransformDirection(math.normalize(startUp));
+
+            transform.position = worldPos + (up * pipeRadius);
+            transform.rotation = Quaternion.LookRotation(forward, up);
+        }
+    }
+
+
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if(other.gameObject.GetComponent<CameraAngleTrigger>() != null)
+        {
+            shipAutoSpeed-=8;
+        }
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if(other.gameObject.GetComponent<CameraAngleTrigger>() != null)
+        {
+            shipAutoSpeed+=8;
+        }
+    }
+
+
 }

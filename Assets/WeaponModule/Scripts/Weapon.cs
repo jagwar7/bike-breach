@@ -11,6 +11,19 @@ public class Weapon : MonoBehaviour
 
     private float _nextFireTime;
 
+    [Header("Bullet Layer")]
+    [SerializeField] private string bulletLayerName;   
+    private int _bulletLayer = -1;
+
+
+
+    private void Awake()
+    {
+        _bulletLayer = LayerMask.NameToLayer(bulletLayerName);
+    }
+
+
+
     public bool Fire(Vector3 targetPosition)
     {
         if (config == null || firePoint == null || Time.time < _nextFireTime)
@@ -19,7 +32,6 @@ public class Weapon : MonoBehaviour
         }
 
         Vector3 direction = (targetPosition - firePoint.position).normalized;
-        Debug.DrawLine(firePoint.position, targetPosition, Color.green, 10.0f);
         if (direction == Vector3.zero)
         {
             return false;
@@ -31,6 +43,12 @@ public class Weapon : MonoBehaviour
         Quaternion bulletRotation = targetAimRotation * Quaternion.Euler(90f, 0f, 0f);
 
         GameObject bulletObj = Instantiate(config.bulletPrefab, firePoint.position, bulletRotation);
+
+        // Assign the designated layer (PlayerBullet / EnemyBullet) to the spawned bullet
+        if (_bulletLayer != -1)
+        {
+            bulletObj.layer = _bulletLayer;
+        }
 
         if (bulletObj.TryGetComponent(out Bullet bullet))
         {

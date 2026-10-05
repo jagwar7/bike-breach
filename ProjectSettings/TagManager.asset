@@ -15,10 +15,10 @@ TagManager:
   - SceneObject
   - Player
   - Enemy
-  - Bullet
+  - 
   - TriggerBox
-  - 
-  - 
+  - EnemyBullet
+  - PlayerBullet
   - 
   - 
   - 

@@ -7,10 +7,11 @@ public class EnemyIdleState : IEnemyState
 
     private readonly EnemyCharacter _enemy;
     private Coroutine _engageCoroutine;
-
+    private EnemyConfig _config;
     public EnemyIdleState(EnemyCharacter enemy)
     {
         _enemy = enemy;
+        _config = enemy.Config;
     }
 
     public void Enter()
@@ -42,7 +43,9 @@ public class EnemyIdleState : IEnemyState
 
     private IEnumerator WaitAndEngage()
     {
-        yield return new WaitForSeconds(2.5f);
+        Debug.Log("WAITING TO ENGAGE");
+        yield return new WaitForSeconds(_config.WaitingTimeBeforeEngage);
+        Debug.Log("ENGAGING TARGET");
         _engageCoroutine = null;
         _enemy.StateMachine.ChangeState(_enemy.EngageState);
     }

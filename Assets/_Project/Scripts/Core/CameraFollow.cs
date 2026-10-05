@@ -11,9 +11,13 @@ public class CameraFollow : MonoBehaviour
 
     [Header("Smoothing")]
     [SerializeField] private float positionSmoothSpeed = 10f;
-    [SerializeField] private float rotationSmoothSpeed = 10f;
+    [SerializeField] private float rotationSmoothSpeed = 5f;
 
-    [Tooltip("Smoothing speed for the track frame transition when switching follow mode on/off.")]
+    [Header("Trigger Angle Transition")]
+    [Tooltip("Time in seconds to complete the angle shift toward the enemy. Increase to make it slower/smoother.")]
+    [SerializeField] private float yawTransitionDuration = 1.2f;
+
+    [Tooltip("Smoothing speed for follow-mode track alignment.")]
     [SerializeField] private float orientationBlendSpeed = 3f;
 
     [Header("Rotation Tracking Mode")]
@@ -22,6 +26,11 @@ public class CameraFollow : MonoBehaviour
 
     private Quaternion _currentTrackOrientation = Quaternion.identity;
     private Quaternion _lockedOrientation = Quaternion.identity;
+
+    // Angle offset state
+    private float _currentYawOffset = 0f;
+    private float _targetYawOffset = 0f;
+    private float _yawVelocity = 0f;
 
     public bool FollowPlayerRotation => followPlayerRotation;
 
@@ -40,50 +49,62 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return;
 
+        // 1. Smoothly damp the yaw angle over yawTransitionDuration seconds
+        _currentYawOffset = Mathf.SmoothDampAngle(
+            _currentYawOffset, 
+            _targetYawOffset, 
+            ref _yawVelocity, 
+            yawTransitionDuration
+        );
+
+        Quaternion yawRotation = Quaternion.Euler(0f, _currentYawOffset, 0f);
         Quaternion desiredTrackOrientation;
 
         if (followPlayerRotation)
         {
-            // 1. Flatten forward vector so camera never rolls with the bike
             Vector3 forwardFlat = Vector3.ProjectOnPlane(target.forward, Vector3.up).normalized;
             if (forwardFlat == Vector3.zero) forwardFlat = Vector3.forward;
 
-            // Target orientation to aim for
-            desiredTrackOrientation = Quaternion.LookRotation(forwardFlat, Vector3.up);
+            desiredTrackOrientation = Quaternion.LookRotation(forwardFlat, Vector3.up) * yawRotation;
         }
         else
         {
-            // Target orientation stays pinned to the locked heading
-            desiredTrackOrientation = _lockedOrientation;
+            desiredTrackOrientation = _lockedOrientation * yawRotation;
         }
 
-        // 2. Smoothly slerp the tracking frame instead of snapping instantly
+        // 2. Blend tracking frame
         _currentTrackOrientation = Quaternion.Slerp(
             _currentTrackOrientation, 
             desiredTrackOrientation, 
             orientationBlendSpeed * Time.deltaTime
         );
 
-        // 3. Compute position behind bike using the smoothed track orientation
+        // 3. Position tracking
         Vector3 targetPosition = target.position + (_currentTrackOrientation * offset);
         transform.position = Vector3.Lerp(transform.position, targetPosition, positionSmoothSpeed * Time.deltaTime);
 
-        // 4. Look ahead and above bike to keep it framed at the bottom of the screen
+        // 4. Focal point tracking
         Vector3 lookTarget = target.position + (_currentTrackOrientation * lookAheadOffset);
         Quaternion targetRotation = Quaternion.LookRotation((lookTarget - transform.position).normalized, Vector3.up);
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
     }
 
-    /// <summary>
-    /// Call this to toggle rotation following on or off.
-    /// </summary>
+    public void SetYawOffset(float angleInDegrees)
+    {
+        _targetYawOffset = angleInDegrees;
+    }
+
+    public void ResetYawOffset()
+    {
+        _targetYawOffset = 0f;
+    }
+
     public void SetRotationFollow(bool shouldFollow)
     {
         if (followPlayerRotation == shouldFollow) return;
 
         followPlayerRotation = shouldFollow;
 
-        // When disabling rotation tracking, pin the current orientation
         if (!followPlayerRotation)
         {
             _lockedOrientation = _currentTrackOrientation;

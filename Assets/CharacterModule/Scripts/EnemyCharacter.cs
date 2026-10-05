@@ -27,12 +27,14 @@ public class EnemyCharacter : MonoBehaviour
 
     private Health _ownHealth;
     private Health _targetHealth;
-    private bool _isSlowMoActive;
+    public bool _isSlowMoActive;
     private bool _isDead;
+    public Animator _animator;
 
     private void Awake()
     {
         _ownHealth = GetComponent<Health>();
+        _animator = GetComponent<Animator>();
 
         StateMachine = new EnemyStateMachine();
         IdleState = new EnemyIdleState(this);
@@ -80,7 +82,7 @@ public class EnemyCharacter : MonoBehaviour
         if (_isSlowMoActive && TimeManager.Instance != null)
         {
             _isSlowMoActive = false;
-            TimeManager.Instance.RestoreNormalTime();
+            // TimeManager.Instance.RestoreNormalTime();
         }
 
         ClearTarget();
@@ -89,7 +91,7 @@ public class EnemyCharacter : MonoBehaviour
     private void Update()
     {
         StateMachine.Update();
-        HandleSlowMotionRange();
+        // HandleSlowMotionRange();
     }
 
     private void HandleTargetChanged(Transform newTarget)
@@ -123,12 +125,12 @@ public class EnemyCharacter : MonoBehaviour
         if (distance <= slowMoDistanceThreshold && !_isSlowMoActive)
         {
             _isSlowMoActive = true;
-            TimeManager.Instance.EnableSlowMotion(0.5f);
+            // TimeManager.Instance.EnableSlowMotion(0.5f);
         }
         else if (distance > slowMoDistanceThreshold && _isSlowMoActive)
         {
             _isSlowMoActive = false;
-            TimeManager.Instance.RestoreNormalTime();
+            // TimeManager.Instance.RestoreNormalTime();
         }
     }
 
@@ -166,7 +168,7 @@ public class EnemyCharacter : MonoBehaviour
         if (_isSlowMoActive && TimeManager.Instance != null)
         {
             _isSlowMoActive = false;
-            TimeManager.Instance.RestoreNormalTime();
+            // TimeManager.Instance.RestoreNormalTime();
         }
 
         StateMachine.ChangeState(DeadState);
@@ -185,6 +187,7 @@ public class EnemyCharacter : MonoBehaviour
 
     public void RequestShoot(Vector3 aimPosition)
     {
-        OnShootRequested?.Invoke(aimPosition);
+        Vector3 position = new Vector3(aimPosition.x, aimPosition.y, aimPosition.z + 0.5f);
+        OnShootRequested?.Invoke(position);
     }
 }

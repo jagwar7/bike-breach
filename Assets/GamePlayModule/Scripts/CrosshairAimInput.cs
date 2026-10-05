@@ -12,9 +12,13 @@ public class CrosshairAimInput : MonoBehaviour
     [SerializeField] private Camera mainCamera;
 
     [Header("Targeting Settings")]
-    [Tooltip("Set to 'Everything' so the player aims at whatever the cursor touches.")]
+    [Tooltip("Layers to hit when not aiming at an enemy (ground, containers, walls).")]
     [SerializeField] private LayerMask aimLayers = ~0;
     [SerializeField] private float rayDistance = 100f;
+
+    [Header("Screen Space Aim Assist")]
+    [Tooltip("Leave at 0 to automatically use the crosshair UI radius. Set > 0 to manually define pixel radius.")]
+    [SerializeField] private float customScreenRadius = 0f;
 
     [Header("Bottom Deadzone")]
     [Tooltip("Screen height fraction (0.3 = bottom 30%) where aiming/shooting is disabled to avoid firing backwards.")]
@@ -36,6 +40,8 @@ public class CrosshairAimInput : MonoBehaviour
 
     private Transform _aimPointTransform;
 
+    public Vector3 CurrentAimWorldPoint => _currentAimWorldPoint;
+
     private void Awake()
     {
         _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
@@ -48,7 +54,6 @@ public class CrosshairAimInput : MonoBehaviour
         GameObject aimObj = new GameObject("Crosshair_WorldAimPoint");
         _aimPointTransform = aimObj.transform;
 
-        // Auto-assign player character if slot was missed in inspector
         if (playerCharacter == null)
         {
             playerCharacter = FindAnyObjectByType<PlayerCharacter>();
@@ -64,7 +69,6 @@ public class CrosshairAimInput : MonoBehaviour
     {
         _wasTouching = false;
 
-        // Position crosshair safely in upper screen on start
         if (crosshairRect != null)
         {
             crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.75f, 0f);
@@ -83,16 +87,12 @@ public class CrosshairAimInput : MonoBehaviour
         HandleScreenDrag(isScreenTouching);
         UpdateAimPointAndTarget();
 
-        // Fire rapidly whenever screen is touched/dragged and reticle is above the deadzone
         if (_isInAimZone && isScreenTouching && playerCharacter != null)
         {
             playerCharacter.TryShoot(_currentAimWorldPoint);
         }
     }
 
-    /// <summary>
-    /// Checks touch input directly, falling back safely without relying exclusively on external service state.
-    /// </summary>
     private bool IsInputActive()
     {
         if (_inputService != null && _inputService.IsTouching)
@@ -143,11 +143,11 @@ public class CrosshairAimInput : MonoBehaviour
 
         return Input.mousePosition;
     }
+
     private void UpdateAimPointAndTarget()
     {
         if (crosshairRect == null || mainCamera == null) return;
 
-        // Convert UI rect to screen position
         Canvas canvas = crosshairRect.GetComponentInParent<Canvas>();
         Camera uiCam = (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay) 
             ? canvas.worldCamera 
@@ -164,28 +164,40 @@ public class CrosshairAimInput : MonoBehaviour
             return;
         }
 
-        // 1. Cast ray from screen cursor into the 3D scene
-        Ray ray = mainCamera.ScreenPointToRay(screenPos);
+        // 1. Calculate the visible reticle radius in real screen pixels
+        float reticlePixelRadius = customScreenRadius > 0f 
+            ? customScreenRadius 
+            : (crosshairRect.rect.width * 0.5f * (canvas != null ? canvas.scaleFactor : 1f));
 
-        if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
+        // 2. Check if any enemy falls inside the 2D crosshair circle
+        Transform lockedEnemy = FindEnemyInsideReticle(screenPos, reticlePixelRadius);
+
+        if (lockedEnemy != null)
         {
-            _currentAimWorldPoint = hit.point;
+            // Snap to the center of the enemy's main collider/torso
+            Collider enemyCol = lockedEnemy.GetComponentInChildren<Collider>();
+            _currentAimWorldPoint = (enemyCol != null) ? enemyCol.bounds.center : lockedEnemy.position + Vector3.up * 1.0f;
         }
         else
         {
-            _currentAimWorldPoint = ray.GetPoint(rayDistance);
+            // 3. Fallback: Raycast against ground/environment if reticle is empty
+            Ray ray = mainCamera.ScreenPointToRay(screenPos);
+            if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
+            {
+                _currentAimWorldPoint = hit.point;
+            }
+            else
+            {
+                _currentAimWorldPoint = ray.GetPoint(rayDistance);
+            }
         }
 
-        // 2. Draw a line from the weapon muzzle to the exact hit position on the object
-        if (weaponMuzzle != null)
-        {
-            Debug.DrawLine(weaponMuzzle.position, _currentAimWorldPoint, Color.red);
-        }
-        else if (playerCharacter != null)
-        {
-            // Fallback to player position if muzzle is not assigned
-            Debug.DrawLine(playerCharacter.transform.position + Vector3.up * 1.2f, _currentAimWorldPoint, Color.red);
-        }
+        // Draw debug line in Scene view
+        Vector3 origin = weaponMuzzle != null 
+            ? weaponMuzzle.position 
+            : (playerCharacter != null ? playerCharacter.transform.position + Vector3.up * 1.2f : transform.position);
+
+        Debug.DrawLine(origin, _currentAimWorldPoint, Color.red);
 
         // Update target transform for IK / aiming
         if (_aimPointTransform != null)
@@ -198,6 +210,47 @@ public class CrosshairAimInput : MonoBehaviour
             }
         }
     }
+
+    /// <summary>
+    /// Searches for any living enemy whose chest coordinate falls within the crosshair circle on screen.
+    /// </summary>
+    private Transform FindEnemyInsideReticle(Vector2 reticleCenter, float radiusInPixels)
+    {
+        Transform closestEnemy = null;
+        float closestDist = float.MaxValue;
+
+        Health[] allHealths = FindObjectsOfType<Health>();
+
+        for (int i = 0; i < allHealths.Length; i++)
+        {
+            Health health = allHealths[i];
+
+            // Ignore player character or destroyed/disabled entities
+            if (!health.enabled || health.GetComponent<PlayerCharacter>() != null || health.GetComponentInParent<PlayerCharacter>() != null)
+            {
+                continue;
+            }
+
+            // Estimate torso height
+            Vector3 worldPos = health.transform.position + Vector3.up * 1.0f;
+            Vector3 screenPoint = mainCamera.WorldToScreenPoint(worldPos);
+
+            // Ignore objects behind camera
+            if (screenPoint.z <= 0) continue;
+
+            float dist = Vector2.Distance(reticleCenter, (Vector2)screenPoint);
+
+            // Target is inside the UI circle radius
+            if (dist <= radiusInPixels && dist < closestDist)
+            {
+                closestDist = dist;
+                closestEnemy = health.transform;
+            }
+        }
+
+        return closestEnemy;
+    }
+
     private void OnDestroy()
     {
         if (_aimPointTransform != null)

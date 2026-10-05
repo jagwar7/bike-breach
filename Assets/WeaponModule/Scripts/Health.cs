@@ -8,7 +8,7 @@ public class Health : MonoBehaviour
     public event Action<Vector3, Vector3> OnDeathWithForce;
     public event Action OnDeath;
 
-    private float currentHealth;
+    public float currentHealth;
     private bool isDead = false;
 
     public float CurrentHealth => currentHealth;
