@@ -11,8 +11,11 @@ public class EnemyConfig : ScriptableObject
 
     [SerializeField] private float fireInterval = 1f;
 
+    [SerializeField] private float waitingTimeBeforeEngage = 2f;
+
 
     public float DetectionRange => detectionRange;
     public float TurnSpeed => turnSpeed;
     public float FireInterval => fireInterval;
+    public float WaitingTimeBeforeEngage => waitingTimeBeforeEngage;
 }

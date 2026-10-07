@@ -26,6 +26,11 @@ public class Bullet : MonoBehaviour
         _direction = direction.normalized;
         _hasHit = false;
 
+        if (_bulletCollider != null)
+        {
+            _bulletCollider.enabled = true;
+        }
+
         Destroy(gameObject, Lifetime);
     }
 
@@ -36,36 +41,24 @@ public class Bullet : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-
-        /// <summary>
-        /// 1. IF BULLET COLLIDED ONCE IT WILL NEVER COLLIDE
-        /// 2. GET HEALTH SCRIPT FROM TARAGET OBJECT
-        /// 3. IF TARGET OBJECT FOUND THEN CONFIRM HIT (HASHIT)
-        /// 4. CALL THE DAMAGE FUNCTION OF HEATLH SCRIPT
-        /// 4. DESTROY GAMEOBJECT
-        /// <summary>
         if (_hasHit) return;
 
-        if (other.GetComponent<Bullet>() != null) return;
+        _hasHit = true;
 
-        if (other.GetComponentInParent<PlayerCharacter>() != null || other.name.Contains("Bike")) return;
+        if (_bulletCollider != null)
+        {
+            _bulletCollider.enabled = false;
+        }
+        Debug.Log($"Bullet hit: {other.gameObject.name}");
 
+        // Damage target if it has a Health component (on the collider or its parent)
         Health targetHealth = other.GetComponentInParent<Health>();
-
-        Debug.Log("OTHER GAME OBJECT NAME: " + other.gameObject.name);
-
         if (targetHealth != null)
         {
-            _hasHit = true;
-
-            if (_bulletCollider != null) 
-                _bulletCollider.enabled = false;
-
             targetHealth.TakeDamage(_damage, _direction, transform.position);
-            Destroy(gameObject);
-            return;
         }
 
+        // Destroy on any valid collision (enemy, player, container, ground)
         Destroy(gameObject);
     }
 }

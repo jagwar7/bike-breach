@@ -3,7 +3,7 @@ using Project.Runtime.Core.Input;
 
 public class CrosshairAimInput : MonoBehaviour
 {
-    [Header("Player References")]
+    [Header("Player References (Dynamic)")]
     [SerializeField] private RiderAimController riderAim;
     [SerializeField] private PlayerCharacter playerCharacter;
 
@@ -12,9 +12,13 @@ public class CrosshairAimInput : MonoBehaviour
     [SerializeField] private Camera mainCamera;
 
     [Header("Targeting Settings")]
-    [Tooltip("Set to 'Everything' so the player aims at whatever the cursor touches.")]
+    [Tooltip("Layers to hit when not aiming at an enemy (ground, containers, walls).")]
     [SerializeField] private LayerMask aimLayers = ~0;
     [SerializeField] private float rayDistance = 100f;
+
+    [Header("Screen Space Aim Assist")]
+    [Tooltip("Leave at 0 to automatically use the crosshair UI radius. Set > 0 to manually define pixel radius.")]
+    [SerializeField] private float customScreenRadius = 0f;
 
     [Header("Bottom Deadzone")]
     [Tooltip("Screen height fraction (0.3 = bottom 30%) where aiming/shooting is disabled to avoid firing backwards.")]
@@ -29,6 +33,7 @@ public class CrosshairAimInput : MonoBehaviour
     [SerializeField] private Transform weaponMuzzle;
 
     private IInputService _inputService;
+    private SplineBikeRunner _bikeRunner;
     private Vector3 _currentAimWorldPoint;
     private Vector2 _lastTouchPosition;
     private bool _wasTouching;
@@ -36,9 +41,12 @@ public class CrosshairAimInput : MonoBehaviour
 
     private Transform _aimPointTransform;
 
+    public Vector3 CurrentAimWorldPoint => _currentAimWorldPoint;
+
     private void Awake()
     {
         _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
+        _bikeRunner = FindAnyObjectByType<SplineBikeRunner>();
 
         if (mainCamera == null)
         {
@@ -47,27 +55,41 @@ public class CrosshairAimInput : MonoBehaviour
 
         GameObject aimObj = new GameObject("Crosshair_WorldAimPoint");
         _aimPointTransform = aimObj.transform;
-
-        // Auto-assign player character if slot was missed in inspector
-        if (playerCharacter == null)
-        {
-            playerCharacter = FindAnyObjectByType<PlayerCharacter>();
-        }
-
-        if (riderAim == null)
-        {
-            riderAim = FindAnyObjectByType<RiderAimController>();
-        }
     }
 
     private void OnEnable()
     {
         _wasTouching = false;
 
-        // Position crosshair safely in upper screen on start
         if (crosshairRect != null)
         {
             crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.75f, 0f);
+        }
+
+        EnsurePlayerReferences();
+    }
+
+    private void EnsurePlayerReferences()
+    {
+        // 1. Try reading the active character from SplineBikeRunner
+        if (_bikeRunner == null)
+        {
+            _bikeRunner = FindAnyObjectByType<SplineBikeRunner>();
+        }
+
+        if (_bikeRunner != null && _bikeRunner.ActivePlayerCharacter != null)
+        {
+            playerCharacter = _bikeRunner.ActivePlayerCharacter;
+            riderAim = playerCharacter.GetComponent<RiderAimController>();
+        }
+        else if (playerCharacter == null)
+        {
+            // Fallback search across scene
+            playerCharacter = FindAnyObjectByType<PlayerCharacter>();
+            if (playerCharacter != null)
+            {
+                riderAim = playerCharacter.GetComponent<RiderAimController>();
+            }
         }
 
         if (riderAim != null && _aimPointTransform != null)
@@ -76,23 +98,30 @@ public class CrosshairAimInput : MonoBehaviour
         }
     }
 
-    private void Update()
+private void Update()
+{
+    if (playerCharacter == null)
     {
-        bool isScreenTouching = IsInputActive();
-
-        HandleScreenDrag(isScreenTouching);
-        UpdateAimPointAndTarget();
-
-        // Fire rapidly whenever screen is touched/dragged and reticle is above the deadzone
-        if (_isInAimZone && isScreenTouching && playerCharacter != null)
-        {
-            playerCharacter.TryShoot(_currentAimWorldPoint);
-        }
+        EnsurePlayerReferences();
     }
 
-    /// <summary>
-    /// Checks touch input directly, falling back safely without relying exclusively on external service state.
-    /// </summary>
+    // Only allow aiming and shooting if we have reached the ship combat deck
+    if (_bikeRunner != null && _bikeRunner.CurrentState != BikeRunState.OnShipDeckCombat)
+    {
+        return;
+    }
+
+    bool isScreenTouching = IsInputActive();
+
+    HandleScreenDrag(isScreenTouching);
+    UpdateAimPointAndTarget();
+
+    if (_isInAimZone && isScreenTouching && playerCharacter != null)
+    {
+        playerCharacter.TryShoot(_currentAimWorldPoint);
+    }
+}
+
     private bool IsInputActive()
     {
         if (_inputService != null && _inputService.IsTouching)
@@ -143,11 +172,11 @@ public class CrosshairAimInput : MonoBehaviour
 
         return Input.mousePosition;
     }
+
     private void UpdateAimPointAndTarget()
     {
         if (crosshairRect == null || mainCamera == null) return;
 
-        // Convert UI rect to screen position
         Canvas canvas = crosshairRect.GetComponentInParent<Canvas>();
         Camera uiCam = (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay) 
             ? canvas.worldCamera 
@@ -164,30 +193,36 @@ public class CrosshairAimInput : MonoBehaviour
             return;
         }
 
-        // 1. Cast ray from screen cursor into the 3D scene
-        Ray ray = mainCamera.ScreenPointToRay(screenPos);
+        float reticlePixelRadius = customScreenRadius > 0f 
+            ? customScreenRadius 
+            : (crosshairRect.rect.width * 0.5f * (canvas != null ? canvas.scaleFactor : 1f));
 
-        if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
+        Transform lockedEnemy = FindEnemyInsideReticle(screenPos, reticlePixelRadius);
+
+        if (lockedEnemy != null)
         {
-            _currentAimWorldPoint = hit.point;
+            Collider enemyCol = lockedEnemy.GetComponentInChildren<Collider>();
+            _currentAimWorldPoint = (enemyCol != null) ? enemyCol.bounds.center : lockedEnemy.position + Vector3.up * 1.0f;
         }
         else
         {
-            _currentAimWorldPoint = ray.GetPoint(rayDistance);
+            Ray ray = mainCamera.ScreenPointToRay(screenPos);
+            if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
+            {
+                _currentAimWorldPoint = hit.point;
+            }
+            else
+            {
+                _currentAimWorldPoint = ray.GetPoint(rayDistance);
+            }
         }
 
-        // 2. Draw a line from the weapon muzzle to the exact hit position on the object
-        if (weaponMuzzle != null)
-        {
-            Debug.DrawLine(weaponMuzzle.position, _currentAimWorldPoint, Color.red);
-        }
-        else if (playerCharacter != null)
-        {
-            // Fallback to player position if muzzle is not assigned
-            Debug.DrawLine(playerCharacter.transform.position + Vector3.up * 1.2f, _currentAimWorldPoint, Color.red);
-        }
+        Vector3 origin = weaponMuzzle != null 
+            ? weaponMuzzle.position 
+            : (playerCharacter != null ? playerCharacter.transform.position + Vector3.up * 1.2f : transform.position);
 
-        // Update target transform for IK / aiming
+        Debug.DrawLine(origin, _currentAimWorldPoint, Color.red);
+
         if (_aimPointTransform != null)
         {
             _aimPointTransform.position = _currentAimWorldPoint;
@@ -198,6 +233,40 @@ public class CrosshairAimInput : MonoBehaviour
             }
         }
     }
+
+    private Transform FindEnemyInsideReticle(Vector2 reticleCenter, float radiusInPixels)
+    {
+        Transform closestEnemy = null;
+        float closestDist = float.MaxValue;
+
+        Health[] allHealths = FindObjectsByType<Health>(FindObjectsSortMode.None);
+
+        for (int i = 0; i < allHealths.Length; i++)
+        {
+            Health h = allHealths[i];
+
+            if (!h.enabled || h.GetComponent<PlayerCharacter>() != null || h.GetComponentInParent<PlayerCharacter>() != null)
+            {
+                continue;
+            }
+
+            Vector3 worldPos = h.transform.position + Vector3.up * 1.0f;
+            Vector3 screenPoint = mainCamera.WorldToScreenPoint(worldPos);
+
+            if (screenPoint.z <= 0) continue;
+
+            float dist = Vector2.Distance(reticleCenter, (Vector2)screenPoint);
+
+            if (dist <= radiusInPixels && dist < closestDist)
+            {
+                closestDist = dist;
+                closestEnemy = h.transform;
+            }
+        }
+
+        return closestEnemy;
+    }
+
     private void OnDestroy()
     {
         if (_aimPointTransform != null)
