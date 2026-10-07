@@ -37,6 +37,11 @@ public class PlayerCharacter : MonoBehaviour
         ragdoll = GetComponent<RagdollController>();
     }
 
+    public void BindBikeRunner(SplineBikeRunner runner)
+    {
+        bikeRunner = runner;
+    }
+
     void OnEnable()
     {
         if (health != null)
@@ -58,22 +63,12 @@ public class PlayerCharacter : MonoBehaviour
         Debug.Log("PLAYER CHARACTER SPAWNED FIRST");
     }
 
-    void Update()
-    {
-        // Debug fallback for editor testing
-        // if (Input.GetKey(KeyCode.F))
-        // {
-        //     TryShoot(transform.position + transform.forward * 20f);
-        // }
-    }
-
     /// <summary>
     /// Call this while holding/dragging the screen to continuously fire towards the crosshair's world point.
     /// When released, simply stop calling this method.
     /// </summary>
     public void TryShoot(Vector3 targetWorldPosition)
     {
-
         if (!enabled) return;
         if (Time.time <= lastFireTime) 
         {
@@ -93,13 +88,11 @@ public class PlayerCharacter : MonoBehaviour
 
         if (weaponL != null)
         {
-            // Debug.Log("[SHOOT CHECK 4] Calling weaponL.Fire()");
             weaponL.Fire(targetWorldPosition);
         }
 
         if (weaponR != null)
         {
-            // Debug.Log("[SHOOT CHECK 4] Calling weaponR.Fire()");
             weaponR.Fire(targetWorldPosition);
         }
 
@@ -110,8 +103,6 @@ public class PlayerCharacter : MonoBehaviour
         lastFireTime = Time.time + fireRate;
     }
 
-
-
     private void HandleDeath()
     {
         if (aimController != null)
@@ -119,21 +110,42 @@ public class PlayerCharacter : MonoBehaviour
             aimController.enabled = false;
         }
         
-        transform.SetParent(null);
+        transform.SetParent(null, true);
 
         if (animator != null)
         {
             animator.enabled = false;
         }
 
+        // Inform the bike runner to halt spline traversal and trigger physics crash
         if (bikeRunner != null)
         {
             bikeRunner.OnPlayerDied();
+        }
+        else
+        {
+            var fallbackRunner = FindAnyObjectByType<SplineBikeRunner>();
+            if (fallbackRunner != null)
+            {
+                fallbackRunner.OnPlayerDied();
+            }
         }
 
         if (ragdoll != null)
         {
             ragdoll.SetRagdollActive(true);
+        }
+
+        CameraFollow cam = FindAnyObjectByType<CameraFollow>();
+        if (cam != null)
+        {
+            cam.SnapYawOffsetToZero();
+        }
+
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.TriggerDefeat();
         }
 
         enabled = false;

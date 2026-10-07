@@ -3,26 +3,35 @@ using UnityEngine;
 public class CameraFollow : MonoBehaviour
 {
     [SerializeField] private Transform target;
-    [SerializeField] private Vector3 offset = new Vector3(0f, 2.5f, -4.5f);
 
-    [Header("Screen Framing (Lower Third)")]
+    [Header("Gameplay Framing")]
+    [SerializeField] private Vector3 playOffset;
     [Tooltip("Target focal point relative to the bike. Increase Y to push the bike lower on screen; increase Z to look further ahead.")]
-    [SerializeField] private Vector3 lookAheadOffset = new Vector3(0f, 2.8f, 3.5f);
+    [SerializeField] private Vector3 lookAheadOffset;
+
+    [Header("Intro (Ready State) Framing")]
+    [Tooltip("Camera offset before game starts. Placed to the right and slightly forward/up to showcase the bike.")]
+    [SerializeField] private Vector3 introOffset;
+    [SerializeField] private Vector3 introLookAtOffset;
+
+    [Header("Intro Blend Settings")]
+    [Tooltip("Time in seconds to transition from the side intro angle to the driving position.")]
+    [SerializeField] private float introTransitionDuration = 1.6f;
 
     [Header("Smoothing")]
     [SerializeField] private float positionSmoothSpeed = 10f;
     [SerializeField] private float rotationSmoothSpeed = 5f;
 
     [Header("Trigger Angle Transition")]
-    [Tooltip("Time in seconds to complete the angle shift toward the enemy. Increase to make it slower/smoother.")]
+    [Tooltip("Time in seconds to complete the angle shift toward the enemy.")]
     [SerializeField] private float yawTransitionDuration = 1.2f;
 
     [Tooltip("Smoothing speed for follow-mode track alignment.")]
     [SerializeField] private float orientationBlendSpeed = 3f;
 
     [Header("Rotation Tracking Mode")]
-    [Tooltip("If true, camera follows the player's forward direction. If false, camera locks its orientation and only tracks position.")]
     [SerializeField] private bool followPlayerRotation = true;
+    
 
     private Quaternion _currentTrackOrientation = Quaternion.identity;
     private Quaternion _lockedOrientation = Quaternion.identity;
@@ -32,10 +41,102 @@ public class CameraFollow : MonoBehaviour
     private float _targetYawOffset = 0f;
     private float _yawVelocity = 0f;
 
+
+    private Vector3 _activeOffset;
+    private Vector3 _activeLookTargetOffset;
+    private bool _isIntroActive = true;
+    private float _introBlendTimer = 0f;
+
     public bool FollowPlayerRotation => followPlayerRotation;
+
+    private void Awake()
+    {
+        InitializeOrientation();
+    }
 
     private void Start()
     {
+        InitializeOrientation();
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+            GameManager.Instance.OnStateChanged += HandleGameStateChanged;
+            GameManager.Instance.OnGameRetry -= OnRetryTriggered;
+            GameManager.Instance.OnGameRetry += OnRetryTriggered;
+
+            HandleGameStateChanged(GameManager.Instance.CurrentState);
+        }
+        else
+        {
+            SnapToIntro();
+        }
+    }
+
+    private void OnEnable()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+            GameManager.Instance.OnStateChanged += HandleGameStateChanged;
+            GameManager.Instance.OnGameRetry -= OnRetryTriggered;
+            GameManager.Instance.OnGameRetry += OnRetryTriggered;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+            GameManager.Instance.OnGameRetry -= OnRetryTriggered;
+        }
+    }
+
+    private void HandleGameStateChanged(GameState state)
+    {
+        if (state == GameState.Ready)
+        {
+            SnapYawOffsetToZero();
+            _isIntroActive = true;
+            _introBlendTimer = 0f;
+            SnapToIntro();
+        }
+        else if (state == GameState.Playing)
+        {
+            _isIntroActive = false;
+        }
+    }
+
+    private void OnRetryTriggered()
+    {
+        SnapYawOffsetToZero();
+
+        _isIntroActive = false;
+        _introBlendTimer = introTransitionDuration;
+        _activeOffset = playOffset;
+        _activeLookTargetOffset = lookAheadOffset;
+
+        if (target != null)
+        {
+            Vector3 snapPos = target.position + (_currentTrackOrientation * playOffset);
+            transform.position = snapPos;
+
+            Vector3 lookTarget = target.position + (_currentTrackOrientation * lookAheadOffset);
+            Vector3 dir = (lookTarget - snapPos).normalized;
+            if (dir != Vector3.zero)
+            {
+                transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
+            }
+        }
+    }
+
+    public void SnapYawOffsetToZero()
+    {
+        _targetYawOffset = 0f;
+        _currentYawOffset = 0f;
+        _yawVelocity = 0f;
+
         if (target != null)
         {
             Vector3 forwardFlat = Vector3.ProjectOnPlane(target.forward, Vector3.up).normalized;
@@ -49,11 +150,35 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return;
 
-        // 1. Smoothly damp the yaw angle over yawTransitionDuration seconds
+        // Framing offsets
+        if (_isIntroActive)
+        {
+            _activeOffset = introOffset;
+            _activeLookTargetOffset = introLookAtOffset;
+        }
+        else
+        {
+            if (_introBlendTimer < introTransitionDuration)
+            {
+                _introBlendTimer += Time.deltaTime;
+                float t = Mathf.Clamp01(_introBlendTimer / introTransitionDuration);
+                float smoothT = Mathf.SmoothStep(0f, 1f, t);
+
+                _activeOffset = Vector3.Lerp(introOffset, playOffset, smoothT);
+                _activeLookTargetOffset = Vector3.Lerp(introLookAtOffset, lookAheadOffset, smoothT);
+            }
+            else
+            {
+                _activeOffset = playOffset;
+                _activeLookTargetOffset = lookAheadOffset;
+            }
+        }
+
+        // Yaw damping
         _currentYawOffset = Mathf.SmoothDampAngle(
-            _currentYawOffset, 
-            _targetYawOffset, 
-            ref _yawVelocity, 
+            _currentYawOffset,
+            _targetYawOffset,
+            ref _yawVelocity,
             yawTransitionDuration
         );
 
@@ -72,43 +197,72 @@ public class CameraFollow : MonoBehaviour
             desiredTrackOrientation = _lockedOrientation * yawRotation;
         }
 
-        // 2. Blend tracking frame
+        // Blend tracking
         _currentTrackOrientation = Quaternion.Slerp(
-            _currentTrackOrientation, 
-            desiredTrackOrientation, 
+            _currentTrackOrientation,
+            desiredTrackOrientation,
             orientationBlendSpeed * Time.deltaTime
         );
 
-        // 3. Position tracking
-        Vector3 targetPosition = target.position + (_currentTrackOrientation * offset);
-        transform.position = Vector3.Lerp(transform.position, targetPosition, positionSmoothSpeed * Time.deltaTime);
+        // Position tracking
+        Vector3 targetPosition = target.position + (_currentTrackOrientation * _activeOffset);
+        float posSpeed = (_introBlendTimer < introTransitionDuration && !_isIntroActive) 
+            ? (positionSmoothSpeed * 0.7f) 
+            : positionSmoothSpeed;
+            
+        transform.position = Vector3.Lerp(transform.position, targetPosition, posSpeed * Time.deltaTime);
 
-        // 4. Focal point tracking
-        Vector3 lookTarget = target.position + (_currentTrackOrientation * lookAheadOffset);
-        Quaternion targetRotation = Quaternion.LookRotation((lookTarget - transform.position).normalized, Vector3.up);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+        // Focal tracking
+        Vector3 lookTarget = target.position + (_currentTrackOrientation * _activeLookTargetOffset);
+        Vector3 lookDirection = (lookTarget - transform.position).normalized;
+        
+        if (lookDirection != Vector3.zero)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+            float rotSpeed = (_introBlendTimer < introTransitionDuration && !_isIntroActive) 
+                ? (rotationSmoothSpeed * 0.8f) 
+                : rotationSmoothSpeed;
+                
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotSpeed * Time.deltaTime);
+        }
     }
 
-    public void SetYawOffset(float angleInDegrees)
+    private void InitializeOrientation()
     {
-        _targetYawOffset = angleInDegrees;
+        if (target == null) return;
+        Vector3 forwardFlat = Vector3.ProjectOnPlane(target.forward, Vector3.up).normalized;
+        if (forwardFlat == Vector3.zero) forwardFlat = Vector3.forward;
+        _currentTrackOrientation = Quaternion.LookRotation(forwardFlat, Vector3.up);
+        _lockedOrientation = _currentTrackOrientation;
     }
 
-    public void ResetYawOffset()
+    private void SnapToIntro()
     {
-        _targetYawOffset = 0f;
+        if (target == null) return;
+        InitializeOrientation();
+        _activeOffset = introOffset;
+        _activeLookTargetOffset = introLookAtOffset;
+
+        Vector3 snapPos = target.position + (_currentTrackOrientation * introOffset);
+        transform.position = snapPos;
+
+        Vector3 lookTarget = target.position + (_currentTrackOrientation * introLookAtOffset);
+        Vector3 dir = (lookTarget - snapPos).normalized;
+        if (dir != Vector3.zero)
+        {
+            transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
+        }
     }
+
+    public void SetYawOffset(float angleInDegrees) => _targetYawOffset = angleInDegrees;
+    
+    public void ResetYawOffset() => _targetYawOffset = 0f;
 
     public void SetRotationFollow(bool shouldFollow)
     {
         if (followPlayerRotation == shouldFollow) return;
-
         followPlayerRotation = shouldFollow;
-
-        if (!followPlayerRotation)
-        {
-            _lockedOrientation = _currentTrackOrientation;
-        }
+        if (!followPlayerRotation) _lockedOrientation = _currentTrackOrientation;
     }
 
     public void EnableRotationFollow() => SetRotationFollow(true);

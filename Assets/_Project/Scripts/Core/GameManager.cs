@@ -20,6 +20,7 @@ public class GameManager : MonoBehaviour
     public GameState CurrentState => currentState;
 
     public event Action<GameState> OnStateChanged;
+    public event Action OnGameRetry;
 
     private void Awake()
     {
@@ -83,11 +84,14 @@ public class GameManager : MonoBehaviour
     /// </summary>
     public void RetryLevel()
     {
-        SetState(GameState.Ready);
+        OnGameRetry?.Invoke();
+
         if (LevelManager.Instance != null)
         {
             LevelManager.Instance.RestartCurrentLevel();
         }
+
+        SetState(GameState.Playing);
     }
 
     /// <summary>
@@ -101,6 +105,12 @@ public class GameManager : MonoBehaviour
             LevelManager.Instance.LoadNextLevel();
         }
     }
+
+    public void CompleteLevel()
+    {
+        SetState(GameState.Won);
+    }
+
 
     private void OnDestroy()
     {

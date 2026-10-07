@@ -3,7 +3,7 @@ using Project.Runtime.Core.Input;
 
 public class CrosshairAimInput : MonoBehaviour
 {
-    [Header("Player References")]
+    [Header("Player References (Dynamic)")]
     [SerializeField] private RiderAimController riderAim;
     [SerializeField] private PlayerCharacter playerCharacter;
 
@@ -33,6 +33,7 @@ public class CrosshairAimInput : MonoBehaviour
     [SerializeField] private Transform weaponMuzzle;
 
     private IInputService _inputService;
+    private SplineBikeRunner _bikeRunner;
     private Vector3 _currentAimWorldPoint;
     private Vector2 _lastTouchPosition;
     private bool _wasTouching;
@@ -45,6 +46,7 @@ public class CrosshairAimInput : MonoBehaviour
     private void Awake()
     {
         _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
+        _bikeRunner = FindAnyObjectByType<SplineBikeRunner>();
 
         if (mainCamera == null)
         {
@@ -53,16 +55,6 @@ public class CrosshairAimInput : MonoBehaviour
 
         GameObject aimObj = new GameObject("Crosshair_WorldAimPoint");
         _aimPointTransform = aimObj.transform;
-
-        if (playerCharacter == null)
-        {
-            playerCharacter = FindAnyObjectByType<PlayerCharacter>();
-        }
-
-        if (riderAim == null)
-        {
-            riderAim = FindAnyObjectByType<RiderAimController>();
-        }
     }
 
     private void OnEnable()
@@ -74,24 +66,61 @@ public class CrosshairAimInput : MonoBehaviour
             crosshairRect.position = new Vector3(Screen.width * 0.5f, Screen.height * 0.75f, 0f);
         }
 
+        EnsurePlayerReferences();
+    }
+
+    private void EnsurePlayerReferences()
+    {
+        // 1. Try reading the active character from SplineBikeRunner
+        if (_bikeRunner == null)
+        {
+            _bikeRunner = FindAnyObjectByType<SplineBikeRunner>();
+        }
+
+        if (_bikeRunner != null && _bikeRunner.ActivePlayerCharacter != null)
+        {
+            playerCharacter = _bikeRunner.ActivePlayerCharacter;
+            riderAim = playerCharacter.GetComponent<RiderAimController>();
+        }
+        else if (playerCharacter == null)
+        {
+            // Fallback search across scene
+            playerCharacter = FindAnyObjectByType<PlayerCharacter>();
+            if (playerCharacter != null)
+            {
+                riderAim = playerCharacter.GetComponent<RiderAimController>();
+            }
+        }
+
         if (riderAim != null && _aimPointTransform != null)
         {
             riderAim.target = _aimPointTransform;
         }
     }
 
-    private void Update()
+private void Update()
+{
+    if (playerCharacter == null)
     {
-        bool isScreenTouching = IsInputActive();
-
-        HandleScreenDrag(isScreenTouching);
-        UpdateAimPointAndTarget();
-
-        if (_isInAimZone && isScreenTouching && playerCharacter != null)
-        {
-            playerCharacter.TryShoot(_currentAimWorldPoint);
-        }
+        EnsurePlayerReferences();
     }
+
+    // Only allow aiming and shooting if we have reached the ship combat deck
+    if (_bikeRunner != null && _bikeRunner.CurrentState != BikeRunState.OnShipDeckCombat)
+    {
+        return;
+    }
+
+    bool isScreenTouching = IsInputActive();
+
+    HandleScreenDrag(isScreenTouching);
+    UpdateAimPointAndTarget();
+
+    if (_isInAimZone && isScreenTouching && playerCharacter != null)
+    {
+        playerCharacter.TryShoot(_currentAimWorldPoint);
+    }
+}
 
     private bool IsInputActive()
     {
@@ -164,23 +193,19 @@ public class CrosshairAimInput : MonoBehaviour
             return;
         }
 
-        // 1. Calculate the visible reticle radius in real screen pixels
         float reticlePixelRadius = customScreenRadius > 0f 
             ? customScreenRadius 
             : (crosshairRect.rect.width * 0.5f * (canvas != null ? canvas.scaleFactor : 1f));
 
-        // 2. Check if any enemy falls inside the 2D crosshair circle
         Transform lockedEnemy = FindEnemyInsideReticle(screenPos, reticlePixelRadius);
 
         if (lockedEnemy != null)
         {
-            // Snap to the center of the enemy's main collider/torso
             Collider enemyCol = lockedEnemy.GetComponentInChildren<Collider>();
             _currentAimWorldPoint = (enemyCol != null) ? enemyCol.bounds.center : lockedEnemy.position + Vector3.up * 1.0f;
         }
         else
         {
-            // 3. Fallback: Raycast against ground/environment if reticle is empty
             Ray ray = mainCamera.ScreenPointToRay(screenPos);
             if (Physics.Raycast(ray, out RaycastHit hit, rayDistance, aimLayers))
             {
@@ -192,14 +217,12 @@ public class CrosshairAimInput : MonoBehaviour
             }
         }
 
-        // Draw debug line in Scene view
         Vector3 origin = weaponMuzzle != null 
             ? weaponMuzzle.position 
             : (playerCharacter != null ? playerCharacter.transform.position + Vector3.up * 1.2f : transform.position);
 
         Debug.DrawLine(origin, _currentAimWorldPoint, Color.red);
 
-        // Update target transform for IK / aiming
         if (_aimPointTransform != null)
         {
             _aimPointTransform.position = _currentAimWorldPoint;
@@ -211,40 +234,33 @@ public class CrosshairAimInput : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Searches for any living enemy whose chest coordinate falls within the crosshair circle on screen.
-    /// </summary>
     private Transform FindEnemyInsideReticle(Vector2 reticleCenter, float radiusInPixels)
     {
         Transform closestEnemy = null;
         float closestDist = float.MaxValue;
 
-        Health[] allHealths = FindObjectsOfType<Health>();
+        Health[] allHealths = FindObjectsByType<Health>(FindObjectsSortMode.None);
 
         for (int i = 0; i < allHealths.Length; i++)
         {
-            Health health = allHealths[i];
+            Health h = allHealths[i];
 
-            // Ignore player character or destroyed/disabled entities
-            if (!health.enabled || health.GetComponent<PlayerCharacter>() != null || health.GetComponentInParent<PlayerCharacter>() != null)
+            if (!h.enabled || h.GetComponent<PlayerCharacter>() != null || h.GetComponentInParent<PlayerCharacter>() != null)
             {
                 continue;
             }
 
-            // Estimate torso height
-            Vector3 worldPos = health.transform.position + Vector3.up * 1.0f;
+            Vector3 worldPos = h.transform.position + Vector3.up * 1.0f;
             Vector3 screenPoint = mainCamera.WorldToScreenPoint(worldPos);
 
-            // Ignore objects behind camera
             if (screenPoint.z <= 0) continue;
 
             float dist = Vector2.Distance(reticleCenter, (Vector2)screenPoint);
 
-            // Target is inside the UI circle radius
             if (dist <= radiusInPixels && dist < closestDist)
             {
                 closestDist = dist;
-                closestEnemy = health.transform;
+                closestEnemy = h.transform;
             }
         }
 

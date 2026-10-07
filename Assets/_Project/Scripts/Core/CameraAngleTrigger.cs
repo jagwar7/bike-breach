@@ -14,54 +14,126 @@ public class CameraAngleTrigger : MonoBehaviour
     [SerializeField] private Transform currentEnemyTarget;
     [SerializeField] private bool isTimerActive;
 
-    private bool isCameraFocusOnEnemy;
-
+    private bool _isCameraFocusOnEnemy;
     private CameraFollow _cameraFollow;
-    private Health currentEnemyHealth;
-    
+    private Health _currentEnemyHealth;
 
     private void Awake()
     {
         _cameraFollow = FindAnyObjectByType<CameraFollow>();
-        isCameraFocusOnEnemy = false;
-        if(currentEnemyTarget != null)
+        _isCameraFocusOnEnemy = false;
+
+        if (currentEnemyTarget != null)
         {
-            currentEnemyHealth = currentEnemyTarget.GetComponent<Health>();
+            _currentEnemyHealth = currentEnemyTarget.GetComponent<Health>();
         }
     }
 
-    void Update()
+    private void OnEnable()
     {
-        if(isCameraFocusOnEnemy && currentEnemyTarget != null && _cameraFollow != null)
+        if (GameManager.Instance != null)
         {
-            if(currentEnemyHealth != null && currentEnemyHealth.IsDead)
-            {
-                Debug.Log("ENEMY DIED. RESETTING CAMERA YAW OFFSET");
-                _cameraFollow.ResetYawOffset();
-                isCameraFocusOnEnemy = false;
-                return;
-            }
+            GameManager.Instance.OnGameRetry -= ForceInstantReset;
+            GameManager.Instance.OnGameRetry += ForceInstantReset;
+
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+            GameManager.Instance.OnStateChanged += HandleGameStateChanged;
         }
     }
 
+    private void OnDisable()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnGameRetry -= ForceInstantReset;
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+        }
+
+        if (_isCameraFocusOnEnemy && isTimerActive && TimeManager.Instance != null)
+        {
+            TimeManager.Instance.RestoreNormalTime();
+        }
+    }
+
+    private void HandleGameStateChanged(GameState state)
+    {
+        if (state == GameState.Failed || state == GameState.Ready || state == GameState.Playing)
+        {
+            ForceInstantReset();
+        }
+    }
+
+    private void Update()
+    {
+        if (!_isCameraFocusOnEnemy) return;
+
+        if (_currentEnemyHealth != null && _currentEnemyHealth.IsDead)
+        {
+            if (_cameraFollow != null)
+            {
+                _cameraFollow.ResetYawOffset();
+            }
+            _isCameraFocusOnEnemy = false;
+        }
+    }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (other.CompareTag(playerTag) && _cameraFollow != null)
+        // Ignore dead player or non-playing states
+        if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing) return;
+
+        if (other.CompareTag(playerTag) || other.GetComponentInParent<SplineBikeRunner>() != null)
         {
-            Debug.Log($"<color=cyan>[CameraAngleTrigger] Player entered trigger. Setting yaw offset to {targetAngle} degrees.</color>");
-            _cameraFollow.SetYawOffset(targetAngle);
-            isCameraFocusOnEnemy = true;
-            if(isTimerActive) TimeManager.Instance.EnableSlowMotion(0.75f);
+            if (_cameraFollow == null) _cameraFollow = FindAnyObjectByType<CameraFollow>();
+
+            if (_cameraFollow != null)
+            {
+                _cameraFollow.SetYawOffset(targetAngle);
+                _isCameraFocusOnEnemy = true;
+            }
+
+            if (isTimerActive && TimeManager.Instance != null)
+            {
+                TimeManager.Instance.EnableSlowMotion(0.75f);
+            }
         }
     }
 
     private void OnTriggerExit(Collider other)
     {
-        if (resetOnExit && other.CompareTag(playerTag) && _cameraFollow != null && currentEnemyHealth.IsDead == false && isCameraFocusOnEnemy)
+        if (!other.CompareTag(playerTag) && other.GetComponentInParent<SplineBikeRunner>() == null) return;
+
+        if (resetOnExit && _isCameraFocusOnEnemy)
         {
-            _cameraFollow.ResetYawOffset();
+            if (_cameraFollow != null)
+            {
+                _cameraFollow.ResetYawOffset();
+            }
         }
-        if(isTimerActive) TimeManager.Instance.RestoreNormalTime();
+
+        if (isTimerActive && TimeManager.Instance != null)
+        {
+            TimeManager.Instance.RestoreNormalTime();
+        }
+
+        _isCameraFocusOnEnemy = false;
+    }
+
+    public void ForceInstantReset()
+    {
+        _isCameraFocusOnEnemy = false;
+
+        if (_cameraFollow == null)
+            _cameraFollow = FindAnyObjectByType<CameraFollow>();
+
+        if (_cameraFollow != null)
+        {
+            _cameraFollow.SnapYawOffsetToZero();
+        }
+
+        if (isTimerActive && TimeManager.Instance != null)
+        {
+            TimeManager.Instance.RestoreNormalTime();
+        }
     }
 }

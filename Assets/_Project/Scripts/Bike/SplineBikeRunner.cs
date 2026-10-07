@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Splines;
@@ -43,8 +44,9 @@ public class SplineBikeRunner : MonoBehaviour
     [Header("Ship Combat Movement (Automatic Fixed Speed)")]
     [SerializeField] private float shipAutoSpeed = 15f;
 
-    [Header("Death Behavior")]
-    [SerializeField] private Transform playerCharacterTransform;
+    [Header("Player Spawning & Death")]
+    [SerializeField] private GameObject playerPrefab;
+    [SerializeField] private Transform seatSocket;
     [SerializeField] private bool usePhysicsCrashOnDeath = true;
 
     [Header("Events")]
@@ -61,45 +63,113 @@ public class SplineBikeRunner : MonoBehaviour
     private float _currentSpeed;
     private float _rollAngle;
 
+    // Transition variables
     private Vector3 _transitionStartPos;
     private Quaternion _transitionStartRot;
     private Vector3 _knot0WorldPos;
     private Quaternion _knot0WorldRot;
     private float _transitionProgress;
 
+    // Speed modifiers
+    private float _baseShipAutoSpeed;
+    private float _shipSpeedModifier = 0f;
+
+    // Input gating to prevent start-tap bleeding
+    private bool _canDrive = false;
+
+    // Active player instance tracking
+    private GameObject _activePlayerInstance;
+    private PlayerCharacter _activePlayerCharacter;
+
     public BikeRunState CurrentState => _currentState;
+    public PlayerCharacter ActivePlayerCharacter => _activePlayerCharacter;
 
     private void Awake()
     {
         _rb = GetComponent<Rigidbody>();
         _col = GetComponent<Collider>();
 
+        _rb.linearVelocity = Vector3.zero;
+        _rb.angularVelocity = Vector3.zero;
         _rb.isKinematic = true;
         _rb.useGravity = false;
         _rb.interpolation = RigidbodyInterpolation.Interpolate;
 
-        _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
+        _baseShipAutoSpeed = shipAutoSpeed;
+    }
 
-        if (playerCharacterTransform == null)
+    private void Start()
+    {
+        if (_inputService == null)
         {
-            Transform found = transform.Find("PLAYER_CH");
-            if (found != null)
-            {
-                playerCharacterTransform = found;
-            }
+            _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
         }
+    }
+
+    private void OnEnable()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+            GameManager.Instance.OnStateChanged += HandleGameStateChanged;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnStateChanged -= HandleGameStateChanged;
+        }
+    }
+
+    private void HandleGameStateChanged(GameState state)
+    {
+        if (state == GameState.Playing)
+        {
+            StartCoroutine(WaitForFreshTouchRoutine());
+        }
+        else
+        {
+            _canDrive = false;
+            _currentSpeed = 0f;
+        }
+    }
+
+    private IEnumerator WaitForFreshTouchRoutine()
+    {
+        _canDrive = false;
+
+        // Drain lingering touches from pressing the Tap-to-Play button
+        while (Input.touchCount > 0)
+        {
+            Touch touch = Input.GetTouch(0);
+            if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+            {
+                break;
+            }
+            yield return null;
+        }
+
+        // Check mouse click state for editor testing
+        while (Input.GetMouseButton(0))
+        {
+            yield return null;
+        }
+
+        yield return null;
+        _canDrive = true;
     }
 
     private void Update()
     {
-        // IF GAME HASNT STARTED, DO NOT PROGRESS BIKE
-        if(GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing) return;
+        if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing)
+            return;
 
-
-        // Stop all movement and wheel spinning if fallen, dead, or completed
         if (_currentState == BikeRunState.Fallen || 
             _currentState == BikeRunState.ReachedFinishLine || 
-            _currentState == BikeRunState.PlayerDead) return;
+            _currentState == BikeRunState.PlayerDead) 
+            return;
 
         switch (_currentState)
         {
@@ -115,6 +185,7 @@ public class SplineBikeRunner : MonoBehaviour
                 HandleShipDeckCombat();
                 break;
         }
+
         RotateWheels();
     }
 
@@ -124,16 +195,11 @@ public class SplineBikeRunner : MonoBehaviour
 
         float rotationStep = _currentSpeed * wheelSpinSpeedMultiplier * Time.deltaTime;
 
-        // Use Vector3.left (or -Vector3.right) to reverse the spin direction
         if (frontWheel != null)
-        {
             frontWheel.Rotate(Vector3.left, rotationStep, Space.Self);
-        }
 
         if (rearWheel != null)
-        {
             rearWheel.Rotate(Vector3.left, rotationStep, Space.Self);
-        }
     }
 
     public void OnPlayerDied()
@@ -142,10 +208,11 @@ public class SplineBikeRunner : MonoBehaviour
 
         _currentState = BikeRunState.PlayerDead;
         _currentSpeed = 0f;
+        _canDrive = false;
 
-        if (playerCharacterTransform != null)
+        if (_activePlayerInstance != null)
         {
-            playerCharacterTransform.SetParent(null, true);
+            _activePlayerInstance.transform.SetParent(null, true);
         }
 
         if (usePhysicsCrashOnDeath)
@@ -154,9 +221,17 @@ public class SplineBikeRunner : MonoBehaviour
             _rb.useGravity = true;
             _rb.constraints = RigidbodyConstraints.None;
 
-            float forwardVelocity = _currentState == BikeRunState.OnShipDeckCombat ? shipAutoSpeed * 0.8f : _currentSpeed * 0.8f;
+            float forwardVelocity = _currentState == BikeRunState.OnShipDeckCombat 
+                ? (_baseShipAutoSpeed + _shipSpeedModifier) * 0.8f 
+                : _currentSpeed * 0.8f;
+
             _rb.linearVelocity = transform.forward * forwardVelocity;
             _rb.AddTorque(transform.forward * 2f + transform.right * 1f, ForceMode.Impulse);
+        }
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.TriggerDefeat();
         }
 
         onPlayerDied?.Invoke();
@@ -167,7 +242,10 @@ public class SplineBikeRunner : MonoBehaviour
     {
         if (pipelineSpline == null) return;
 
-        bool isTouching = _inputService != null && _inputService.IsTouching;
+        if (_inputService == null)
+            _inputService = FindAnyObjectByType<FloatingJoystickInputService>();
+
+        bool isTouching = _canDrive && (_inputService != null && _inputService.IsTouching);
         float targetSpeed = isTouching ? pipeMaxSpeed : 0f;
         _currentSpeed = Mathf.MoveTowards(_currentSpeed, targetSpeed, pipeAcceleration * Time.deltaTime);
 
@@ -254,10 +332,16 @@ public class SplineBikeRunner : MonoBehaviour
         {
             _currentState = BikeRunState.OnShipDeckCombat;
             _currentDistance = 0f;
-            _currentSpeed = shipAutoSpeed;
+            _currentSpeed = Mathf.Max(2f, _baseShipAutoSpeed + _shipSpeedModifier);
+
+            // Turn crosshair on when combat starts
+            var aimInput = FindAnyObjectByType<CrosshairAimInput>(FindObjectsInactive.Include);
+            if (aimInput != null)
+            {
+                aimInput.gameObject.SetActive(true);
+            }
 
             onEnteredShipCombat?.Invoke();
-            Debug.Log("<color=cyan>[Bike] Docked into Spline 2 (Knot 0). Entering Combat Mode.</color>");
         }
     }
 
@@ -265,7 +349,7 @@ public class SplineBikeRunner : MonoBehaviour
     {
         if (shipSpline == null) return;
 
-        _currentSpeed = shipAutoSpeed;
+        _currentSpeed = Mathf.Max(2f, _baseShipAutoSpeed + _shipSpeedModifier);
         float shipSplineLength = shipSpline.CalculateLength();
         _currentDistance += _currentSpeed * Time.deltaTime;
 
@@ -274,6 +358,12 @@ public class SplineBikeRunner : MonoBehaviour
             _currentState = BikeRunState.ReachedFinishLine;
             _currentSpeed = 0f;
             onFinishedRun?.Invoke();
+
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.TriggerVictory();
+            }
+
             Debug.Log("<color=green>[Bike] Reached the finish line on ship deck!</color>");
             return;
         }
@@ -291,6 +381,7 @@ public class SplineBikeRunner : MonoBehaviour
     private void TriggerPhysicsFall(Vector3 forward, Vector3 right, Vector3 up)
     {
         _currentState = BikeRunState.Fallen;
+        _canDrive = false;
 
         _rb.constraints = RigidbodyConstraints.None;
         _rb.isKinematic = false;
@@ -314,12 +405,39 @@ public class SplineBikeRunner : MonoBehaviour
         Vector3 controlledTumble = (forward * 1.5f * tumbleDirection) + (right * 1.0f);
         _rb.AddTorque(controlledTumble, ForceMode.Impulse);
 
-        if(GameManager.Instance != null)
+        if (GameManager.Instance != null)
         {
             GameManager.Instance.TriggerDefeat();
         }
     }
 
+    public void SpawnFreshPlayer()
+    {
+        if (_activePlayerInstance != null)
+        {
+            Destroy(_activePlayerInstance);
+            _activePlayerInstance = null;
+            _activePlayerCharacter = null;
+        }
+
+        if (playerPrefab == null)
+        {
+            Debug.LogError("[SplineBikeRunner] Player Prefab is unassigned in the Inspector!");
+            return;
+        }
+
+        Transform mountPoint = (seatSocket != null) ? seatSocket : transform;
+
+        _activePlayerInstance = Instantiate(playerPrefab, mountPoint.position, mountPoint.rotation, mountPoint);
+        _activePlayerInstance.transform.localPosition = Vector3.zero;
+        _activePlayerInstance.transform.localRotation = Quaternion.identity;
+
+        _activePlayerCharacter = _activePlayerInstance.GetComponent<PlayerCharacter>();
+        if (_activePlayerCharacter != null)
+        {
+            _activePlayerCharacter.BindBikeRunner(this);
+        }
+    }
 
     /// <summary>
     /// Called by LevelManager to assign new splines and reset the bike state.
@@ -329,30 +447,23 @@ public class SplineBikeRunner : MonoBehaviour
         pipelineSpline = pipe;
         shipSpline = ship;
 
-        // Reset progression variables
         _currentState = BikeRunState.OnPipeline;
         _currentDistance = 0f;
         _currentSpeed = 0f;
         _rollAngle = 0f;
         _transitionProgress = 0f;
+        _shipSpeedModifier = 0f;
+        _canDrive = false;
 
-        // Reset Rigidbody physics to Kinematic
         if (_rb == null) _rb = GetComponent<Rigidbody>();
-        _rb.isKinematic = true;
-        _rb.useGravity = false;
         _rb.linearVelocity = Vector3.zero;
         _rb.angularVelocity = Vector3.zero;
+        _rb.isKinematic = true;
+        _rb.useGravity = false;
         _rb.constraints = RigidbodyConstraints.None;
 
-        // Re-parent player character if it was unparented during death
-        if (playerCharacterTransform != null && playerCharacterTransform.parent != transform)
-        {
-            playerCharacterTransform.SetParent(transform, true);
-            playerCharacterTransform.localPosition = Vector3.zero;
-            playerCharacterTransform.localRotation = Quaternion.identity;
-        }
+        SpawnFreshPlayer();
 
-        // Align bike directly to start of pipeline spline if available
         if (pipelineSpline != null)
         {
             pipelineSpline.Spline.Evaluate(0f, out float3 startPos, out float3 startTangent, out float3 startUp);
@@ -363,25 +474,26 @@ public class SplineBikeRunner : MonoBehaviour
             transform.position = worldPos + (up * pipeRadius);
             transform.rotation = Quaternion.LookRotation(forward, up);
         }
+        var aimInput = FindAnyObjectByType<CrosshairAimInput>(FindObjectsInactive.Include);
+        if (aimInput != null)
+        {
+            aimInput.gameObject.SetActive(false);
+        }
     }
-
-
 
     private void OnTriggerEnter(Collider other)
     {
-        if(other.gameObject.GetComponent<CameraAngleTrigger>() != null)
+        if (other.GetComponent<CameraAngleTrigger>() != null)
         {
-            shipAutoSpeed-=8;
+            _shipSpeedModifier = -8f;
         }
     }
 
     private void OnTriggerExit(Collider other)
     {
-        if(other.gameObject.GetComponent<CameraAngleTrigger>() != null)
+        if (other.GetComponent<CameraAngleTrigger>() != null)
         {
-            shipAutoSpeed+=8;
+            _shipSpeedModifier = 0f;
         }
     }
-
-
 }
